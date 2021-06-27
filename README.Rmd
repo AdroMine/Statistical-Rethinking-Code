@@ -22,8 +22,6 @@ Chapter Notes and End of Chapter Solutions for the book **Statistical Rethinking
 
 These are currently using package `rethinking`. 
 
-Repo URL - [https://github.com/AdroMine/Statistical-Rethinking-Code/](https://github.com/AdroMine/Statistical-Rethinking-Code/)
-
 
 ```{r}
 chapters <- list.files(pattern = "^Chapter\\d+")

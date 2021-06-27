@@ -8,8 +8,6 @@ Rethinking by Richard McElreath, 2nd Edition**.
 
 These are currently using package `rethinking`.
 
-Repo URL - <https://github.com/AdroMine/Statistical-Rethinking-Code/>
-
 | Chapters  | Chapter Notes                                                                          | Chapter EoC Questions                                                                      |
 |:----------|:---------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------|
 | Chapter 4 | [link](Chapter4/Chapter_4.R)                                                           | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter4/Chapter_4_EoC.html) |

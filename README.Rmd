@@ -31,9 +31,14 @@ directory <- data.frame(Chapters = chapters,
                         check.names = FALSE, stringsAsFactors = FALSE)
 
 for(i in seq_along(chapters)){
-     num <- str_extract(chapters[i], "\\d+")
      files <- list.files(chapters[i], include.dirs = FALSE, full.names = TRUE)
-     note <- grep("Chapter_\\d+\\.(R|Rmd)$", files, value = TRUE)
+     
+     if(grepl("Chapter_\\d+\\.html$", files,ignore.case = TRUE)){
+       note <- grep("Chapter_\\d+\\.html$", files, value = TRUE, ignore.case = TRUE)
+     } else {
+       note <- grep("Chapter_\\d+\\.R$", files, value = TRUE)
+     }
+     
      directory[i, 2] <- glue("[link]({note})")
      html <- grep("Chapter_\\d+_EoC\\.html", files, value = TRUE, ignore.case = TRUE)
      directory[i, 3] <- glue("[link](https://adromine.github.io/Statistical-Rethinking-Code/{html})")

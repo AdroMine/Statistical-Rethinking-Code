@@ -18,7 +18,8 @@ library(glue)
 
 # Readme
 
-Statistical Rethinking [Richard McElreath] 2nd Edition chapter notes and solutions in R. 
+Chapter Notes and End of Chapter Solutions for the book **Statistical Rethinking by Richard McElreath, 2nd Edition**. 
+
 These are currently using package `rethinking`. 
 
 
@@ -35,6 +36,7 @@ for(i in seq_along(chapters)){
      
      if(grepl("Chapter_\\d+\\.html$", files,ignore.case = TRUE)){
        note <- grep("Chapter_\\d+\\.html$", files, value = TRUE, ignore.case = TRUE)
+       note <- glue("https://adromine.github.io/Statistical-Rethinking-Code/{note}")
      } else {
        note <- grep("Chapter_\\d+\\.R$", files, value = TRUE)
      }

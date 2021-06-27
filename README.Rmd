@@ -1,0 +1,45 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  echo = FALSE, 
+  message = FALSE, 
+  warning = FALSE,
+  comment = "#>"
+)
+library(stringr)
+library(glue)
+```
+
+# Readme
+
+Statistical Rethinking [Richard McElreath] 2nd Edition chapter notes and solutions in R. 
+These are currently using package `rethinking`. 
+
+
+```{r}
+chapters <- list.files(pattern = "^Chapter\\d+")
+
+directory <- data.frame(Chapters = chapters, 
+                        `Chapter Notes` = NA, 
+                        `Chapter EoC Questions` = NA, 
+                        check.names = FALSE, stringsAsFactors = FALSE)
+
+for(i in seq_along(chapters)){
+     num <- str_extract(chapters[i], "\\d+")
+     files <- list.files(chapters[i], include.dirs = FALSE, full.names = TRUE)
+     note <- grep("Chapter_\\d+\\.(R|Rmd)$", files, value = TRUE)
+     directory[i, 2] <- glue("[link]({note})")
+     html <- grep("Chapter_\\d+_EoC\\.html", files, value = TRUE, ignore.case = TRUE)
+     directory[i, 3] <- glue("[link](https://adromine.github.io/Statistical-Rethinking-Code/{html})")
+}
+
+directory$Chapters <- str_replace(directory$Chapters, "Chapter", "Chapter ")
+knitr::kable(directory)
+```
+

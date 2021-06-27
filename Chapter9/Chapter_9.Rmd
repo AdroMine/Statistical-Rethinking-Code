@@ -1,0 +1,541 @@
+---
+title: "Statistical Rethinking Chapter 9"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+# Metropolis Algorithm - King moving around island
+
+Ring of islands with different population sizes. King has to spend time in each island in proportion of their population. 
+
+1. King in some island, each week decides to either travel to an adjacent island or stay put. 
+2. Tosses coin, and depending on result makes one of the two adjacent islands as target. 
+3. Counts relative prop of current (c) and proposal island (p). Then
+    *  if p > c - move to proposed island with prob = 1
+    *  otherwise, move to proposed island with a probability of = p / c
+
+Simulating the above. 
+
+```{r}
+num_weeks <- 1e5
+positions <- rep(0, num_weeks)
+current <- 10
+for(i in 1:num_weeks){
+    ## record current position
+    positions[i] <- current
+    
+    # flip coing to generate proposal (one of adjacent islands)
+    proposal <- current + sample( c(-1, 1), size = 1)
+    
+    # boundary looping
+    if( proposal < 1)  proposal <- 10
+    if( proposal > 10) proposal <- 1
+    
+    # move?
+    prob_move <- proposal / current
+    current <- ifelse(runif(1) < prob_move, proposal, current)
+}
+```
+
+Plotting the results:
+
+```{r}
+library(withr)
+with_par(list(mfrow = c(1, 2)), 
+         code = {
+             plot(1:500, positions[1:500], xlab = "week", ylab = "island", pch = 20, col = 'blue')
+             
+             plot(table(positions), xlab = 'island', ylab = 'number of weeks', col = '#1E59AE')
+         }
+)
+```
+
+
+
+# Metropolis Algorithm
+
+For high dimensional distributions, samples are from the max. If for instance we assume a multivariate gaussian distribution (of varying dimensions as plotted below), with mean 0, the max is near 0, however, as shown below, we get samples that get further and further away from it as the number of dimensions increases. 
+
+```{r}
+library(rethinking)
+D <- 10
+T <- 1e3
+# Y <- rethinking::rmvnorm(T, rep(0, D), diag(D))
+# rad_dist <- function(Y) sqrt(sum(Y^2))
+# Rd <- sapply(1:T, function(i) rad_dist(Y[i,]))
+# dens(Rd)
+
+plot(NULL, xlim = c(0, 35), ylim = c(0, 1), xlab = "Radial distance from mode")
+
+for(D in c(1, 10, 100, 1000)){
+    
+    Y <- rethinking::rmvnorm(T, rep(0, D), diag(D))
+    rad_dist <- function(Y) sqrt(sum(Y^2))
+    Rd <- sapply(1:T, function(i) rad_dist(Y[i,]))
+    dens(Rd, add = TRUE)
+    k <- density(Rd)
+    text(x = summary(k$x)['Median'], y = summary(k$y)['Max.'], labels = D, adj = c(0, -1.3))
+    
+}
+```
+
+# Hamltonian Monte Carlo
+
+HMC algo needs 5 things to go:
+
+1. a function `U` that returns the negative log-probability of the data at the current position (parameter values)
+2. a function `grad_U` that returns the gradient of the negative log-probability at the current position
+3. a step size `epsilon`
+4. a count of `leapfrog` steps L
+5. a `starting position` current_q
+
+Position is a vector of parameter values. Gradient also same length vector. 
+
+Below `U` function custom built for 2D Gaussian example. It expresses the log posterior as follows:
+
+$$
+\sum_i \log p (y_i | \mu_y, 1) + \sum_i \log p (x_i | \mu_x, 1) + \log p (\mu_y | 0, 0.5) +  \log p (\mu_x | 0, 0.5)
+$$
+
+Here $p(x | a, b) implies Gaussian density of __x__ at mean __a__ and standard deviation __b__. 
+
+```{r}
+# U needs to return neg-log probability
+U <- function(q, a = 0, b = 1, k = 0, d = 1){
+  muy <- q[1]
+  mux <- q[2]
+  U <- (sum(dnorm(y, muy, 1, log = TRUE)) + 
+          sum(dnorm(x, mux, 1, log = TRUE)) + 
+          dnorm(muy, a, b, log = TRUE) + 
+          dnorm(mux, k, d, log = TRUE)
+  )
+  return(-U)
+}
+```
+
+The derivative of the logarithm of any univariate Gaussian with mean a and standard deviation b with respect to a is:
+
+$$
+\frac{\partial \log N (y| a, b)}{\partial a} = \frac{y - a}{b ^ 2}
+$$
+
+Derivative of a sum is a sum of derivatives, so the gradients becomes:
+$$
+\begin{aligned}
+
+\frac{\partial U}{\partial \mu_x} &= 
+\frac{\partial \log N(x | \mu_x, 1)}{\partial \mu_x} + \frac{\partial \log N (\mu_x | 0, 0.5)}{\partial \mu_x} \\
+&= \sum_i \frac{x_i - \mu_x}{1^2} + \frac{0 - \mu_x}{0.5^2}
+
+\end{aligned}
+$$
+
+Similar for $\mu_y$. 
+
+```{r}
+# gradient function
+# need vector of parital derivatives of U with respect to vector q
+
+U_gradient <- function(q, a = 0 , b = 1, k = 0, d = 1){
+  muy <- q[1]
+  mux <- q[2]
+  
+  G1 <- sum(y - muy) + (a - muy) / b^2     # dU/dmuy
+  G2 <- sum(x - mux) + (k - mux) / d^2     # dU/dmux
+  return( c(-G1, -G2))                     # negative because energy is neg-log-prob
+}
+
+# test data
+set.seed(7)
+y <- rnorm(50)
+x <- rnorm(50)
+x <- as.numeric(scale(x))
+y <- as.numeric(scale(y))
+```
+
+Plotting code:
+
+```{r}
+library(shape) # for fancy arrows
+Q <- list()
+Q$q <- c(-0.1,0.2)
+pr <- 0.3
+plot( NULL , ylab="muy" , xlab="mux" , xlim=c(-pr,pr) , ylim=c(-pr,pr) )
+step <- 0.03
+
+L <- 11 # 0.03/28 for U-turns --- 11 for working example
+n_samples <- 4
+path_col <- col.alpha("black",0.5)
+points( Q$q[1] , Q$q[2] , pch=4 , col="black" )
+
+for ( i in 1:n_samples ) {
+  Q <- HMC2( U , U_gradient , step , L , Q$q )
+  if ( n_samples < 10 ) {
+    for ( j in 1:L ) {
+      
+      # kinetic energy
+      K0 <- sum(Q$ptraj[j,]^2)/2                        
+      
+      lines( Q$traj[ j : (j + 1) , 1 ] , Q$traj[ j : (j + 1) , 2] , col = path_col , lwd = 1 + 2 * K0 )
+    }
+    
+    points( Q$traj[1:L+1,] , pch=16 , col="white" , cex=0.35 )
+    Arrows( Q$traj[L,1] , Q$traj[L,2] , Q$traj[L+1,1] , Q$traj[L+1,2] ,
+            arr.length=0.35 , arr.adj = 0.7 )
+    text( Q$traj[L+1,1] , Q$traj[L+1,2] , i , cex=0.8 , pos=4 , offset=0.4 )
+  }
+  
+  points( Q$traj[L+1,1] , Q$traj[L+1,2] , pch=ifelse( Q$accept==1 , 16 , 1 ) ,
+          col=ifelse( abs(Q$dH)>0.1 , "red" , "black" ) )
+}
+```
+
+# ULAM
+
+Redoing `rugged` example using `quap` first. 
+
+```{r}
+data(rugged) 
+d <- rugged
+
+# make log version of outcome 
+d$log_gdp <- log( d$rgdppc_2000 )
+
+# extract countries with GDP data 
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+
+# rescale variables 
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp) 
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+
+# make vars to index Africa (1) or not (2)
+dd$cid <- ifelse(dd$cont_africa == 1, 1, 2)
+
+m8.3 <- quap( 
+    alist(
+        log_gdp_std ~ dnorm( mu , sigma ) ,
+        mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+        a[cid] ~ dnorm( 1 , 0.1 ) ,
+        b[cid] ~ dnorm( 0 , 0.3 ) ,
+        sigma ~ dexp( 1 )
+    ) , data=dd 
+)
+precis(m8.3, depth = 2)
+```
+
+Now we will fit this using HMC. 
+
+We can use the same formula list as before, but we need to do two changes:
+
+- Perform variable preprocessing beforehand. For instance for poly powers, compute them before hand rather than wasting computing power inside HMC every chain. 
+- Make a new trimmed data frame with only variables of interest. (This can be helpful if some of the vars not needed contain NA values, in which case `stan` will fail). 
+
+```{r}
+dat_slim <- list(
+  log_gdp_std = dd$log_gdp_std, 
+  rugged_std = dd$rugged_std, 
+  cid = as.integer(dd$cid)
+)
+str(dat_slim)
+```
+
+with lists, we can have diff vars of different length (which will be useful in multilevel models). 
+
+### Sample from posterior using ulam
+
+```{r}
+m9.1 <- ulam( 
+  alist(
+    log_gdp_std ~ dnorm( mu , sigma ) ,
+    mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) , 
+    a[cid] ~ dnorm( 1 , 0.1 ) , 
+    b[cid] ~ dnorm( 0 , 0.3 ) , 
+    sigma ~ dexp( 1 )
+  ) , data=dat_slim , chains=1 
+)
+```
+
+`ulam` converts above formula to `stancode`. The converted code can be viewed using `stancode(m9.1)`. 
+
+We can see summary using `precis` just like `quap`. 
+
+```{r}
+precis(m9.1, depth = 2)
+```
+
+There are two new columns. Details later. 
+
+* `n_eff` - effectively the number of independent samples we managed to get
+* Rhat4 - estimate of how markov chain converged to target distribution. It should approach 1 from above. 4 indicates the fourth generation. (soon it will be Rhat5!)
+
+### Running multiple chains in parallel
+
+```{r}
+m9.1 <- ulam( 
+  alist(
+    log_gdp_std ~ dnorm( mu , sigma ) ,
+    mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) , 
+    a[cid] ~ dnorm( 1 , 0.1 ) , 
+    b[cid] ~ dnorm( 0 , 0.3 ) , 
+    sigma ~ dexp( 1 )
+  ) , data=dat_slim , chains=4, cores = 4 
+)
+```
+
+`show` will tell us the model formula and how much time it took for each chain to run. 
+
+```{r}
+show(m9.1)
+```
+
+2k samples from all 4 chains. Each chain has 1000 sample, but by default uses the first 500 to adapt. 
+
+```{r}
+precis(m9.1, 2)
+```
+
+Effective samples are more than 2000!! This is since the adaptive sampler Stan uses is "very good" and generated sequential samples that are better than uncorrelated. Essentially it can explore the posterior distribution so efficiently that it can beat random. It's `Jayne's` principle in action. 
+
+> Jayne's principle - if there is a random way of doing something, then there is a non-randomised way that delivers better performance but requires more thought. 
+
+### Visualisation 
+
+```{r}
+pairs(m9.1)
+```
+
+Seems multivariate gaussian. 
+
+### Checking the chain
+
+Chain visualisations can help spot problems. 
+
+First we see a **trace plot**, which plots the samples in sequential order, joined by a line. 
+
+```{r}
+traceplot(m9.1)
+```
+
+by default this shows the progress of all chains. we can use `chains = 1` to get it for one chain only. 
+
+We look for 3 things in these chains:
+
+1. stationarity - path of each chain staying within the same high-probability portion of the posterior distribution
+2. good mixing - means that the chain rapidly explores the full region. It does not slowly wander, but rapidly zig-zags
+3. convergence - mutiple independent chains stick around the same region of high probability. 
+
+
+With multiple chains, they plot over each other, and it can become hard to see independent pathologies in chains. Another visualisation method is a plot of the distributino of the ranked samples, a **TRACE RANK PLOT** or **TRANK PLOT**. 
+
+This takes all the samples for each individual param and then ranks them:- lowest sample gets rank 1, largest gets teh max rank (the no of samples across al chains). Then we draw histogram of these ranks for each individual chain. If the chains are exploring the same space efficiently, the histograms should be similar to one another and largely overlapping. 
+
+```{r}
+trankplot(m9.1)
+```
+
+Horizontal is rank, from 1 to the no of samples (2000 in this example). Vertical axis is the frequency of ranks in each bin of the histogram. 
+
+
+
+# Markov Chain Parameters
+
+
+### How many samples?
+
+1. __What is important is effective number of samples, not the real samples.__ 
+    * `iter` - default 1000
+    * `warmup` - default `iter`/2, so 500 warmup samples + 500 real samples to use for inference
+    * what matters is the **effective** number of samples, not the raw number. 
+    * `n_eff` can be thought of as the length of a Markov chain with no autocorrelation that would provide the same quality of estimate as your chain. It can be larger than the length of the chain if the sequential sampels are anti-correlated in the right way. `n_eff` is only an estimate. 
+2. What do we want to know?
+    * Only posterior means - a couple hundred could be enough.
+    * exact shape in the extreme tails of the posterior, 99th percentile, etc. - then many more
+    * `tail ESS` - the effective sample size (similar to `n_eff`) in the tails of the posterior
+    * **warmup** - with stan models, half of total samples can be devoted. For simpler models, much less is sufficient. 
+    
+### How many chains?
+
+1. When initially debugging, use a single chain. Some error messages don't dipslay unless using one chain. 
+2. When deciding whether the chains are valid, we need more than one chain. 
+3. During the final run from which we will make inferences from, only one chain is required. Using more is fine too. 
+
+> one short chain to debug, four chains for verification and inference
+
+### Rhat
+
+Gelman-Rubin convergence diagnostic $\hat R$. If `n_eff` is lower than actual no of iterations, it means chains are inefficient but still okay. When Rhat is above 1.00 it usually indicates that the chain has not yet converged, and samples may not be trustworthy. If you draw more iterations, it could be fine, or it could never converge. See the Stan user manual for more details. It’s important however not to rely too much on these diagnostics. Like all heuristics, there are cases in which they provide poor advice. For example, Rhat can reach 1.00 even for an invalid chain. So view it perhaps as a signal of danger, but never of safety. For conventional models, these metrics typically work well.
+
+### Taming a wild chain
+
+Broad flat regions of the posterior density can cause problems. They occur when we use flat priors. This can generate a wild wandering Markov chain that erratically samples extremely positive and extremely negative parameter values. 
+
+In below example, we try estimate the mean and sd of two Gaussian observations -1 and 1, but use flat priors. 
+
+```{r}
+y <- c(-1, 1)
+set.seed(11)
+m9.2 <- ulam(
+  alist(
+    y ~ dnorm(mu, sigma), 
+    mu <- alpha,
+    alpha ~ dnorm(0, 1000), 
+    sigma ~ dexp(0.0001)
+  ), data = list(y = y), chains = 3
+)
+precis(m9.2)
+```
+
+alpha should have been close to zero. We get crazy values however, and implausibly large intervals. Even sigma is too big. 
+`n_eff` and `Rhat` diagnositcs don't look good either. We drew 1500 samples in total (3 chains), but effective size iis very less. 
+
+The warning about **divergent transitions after warmup** tells there are problems with the chains. 
+
+For simple models chaining the `adapt_delta` control param will usually remove the divergent transitions. We can try adding `control = list(adapt_delta = 0.99)` to `ulam` call. Default value is 0.95. (won't be of help in this case). 
+
+A second warning will be advising checking the pairs plot. (this is stan's pairs not rethinking's). 
+
+```{r}
+pairs(m9.2@stanfit)
+```
+
+This is like `ulam's` pairs plot but divergent transitions coloured in red. 
+
+```{r}
+traceplot(m9.2)
+```
+
+chains drift around and spike occasionally to extreme values. Not a healthy pair of chains. 
+
+```{r}
+trankplot(m9.2)
+```
+
+rank histograms spend long periods with one chain above / below the others. Indicates poor exploration of the posterior. 
+
+To tame this chain, we would need to use weaker priors. 
+
+```{r}
+set.seed(11)
+m9.3 <- ulam(
+  alist(
+    y ~ dnorm(mu, sigma), 
+    mu <- alpha, 
+    alpha ~ dnorm(1, 10), 
+    sigma ~ dexp(1)
+  ), data = list(y = y), chains = 3
+)
+precis(m9.3)
+```
+
+Much better results this time. 
+
+```{r}
+traceplot(m9.3)
+trankplot(m9.3)
+```
+
+both seem better too. 
+
+```{r}
+pairs(m9.3@stanfit)
+```
+
+```{r}
+post <- extract.samples(m9.3)
+withr::with_par(
+  list(mfrow = c(1, 2)), 
+  code = {
+    plot(NULL, xlim = c(-15, 15), ylim = c(0, 0.4), xlab = "alpha", ylab = "Density")
+    dens(post$alpha, lwd = 2, lty = 1, col = 'navyblue', add = TRUE)
+    dens(rnorm(1e3, 1, 10), lwd = 2, lty = 2, add = TRUE)
+    text(2, 0.25, labels = "Posterior", col = 'navyblue', adj = 0)
+    text(10, 0.05, labels = "Prior", adj = 0)
+    
+    plot(NULL, xlim = c(0, 10), ylim = c(0, 0.7), xlab = "sigma", ylab = "Density")
+    dens(post$sigma, lwd = 2, lty = 1, col = 'navyblue', add = TRUE)
+    dens(rexp(1e3, 1), lwd = 2, lty = 2, add = TRUE)
+  }
+)
+```
+
+### Non identifiable parameters
+
+With highly correlated predictors there is a problem of non-identifiable parameters. 
+
+To construct similar non-identifiable situations, we simulate 100 obs from a Gaussian dist with mean zero and sd 1. 
+
+```{r}
+set.seed(41)
+y <- rnorm(100, mean = 0, sd = 1)
+```
+
+Then we fit the following model:
+
+$$
+\begin{align}
+y_i &\sim Normal(\mu, \sigma) \\
+\mu &= \alpha_1 + \alpha_2 \\
+\alpha_1 &\sim Normal(0, 1000)  \\
+\alpha_2 &\sim Normal(0, 1000)  \\ 
+\sigma &\sim Exponential(1)
+\end{align}
+$$
+
+$\alpha_1$ and $\alpha_2$ can't be identified, only their sum can be identified which should be zero after estimation. 
+
+```{r}
+set.seed(384)
+m9.4 <- ulam(
+  alist(
+    y ~ dnorm(mu, sigma), 
+    mu <- a1 + a2, 
+    a1 ~ dnorm(0, 1000), 
+    a2 ~ dnorm(0, 1000), 
+    sigma ~ dexp(1)
+  ), data = list(y = y), chains = 3
+)
+precis(m9.4)
+```
+
+Estimates seem suspicious, sd are very wide, n_eff is very small, and Rhat is high too. This is since we can't simultaneously estimate a1 and a2, but only their sum. 
+
+We also a warning about __"# transitions after warmup exceeded the max treedepth"__. These indicate inefficient but not broken chains. 
+
+```{r}
+traceplot(m9.4)
+trankplot(m9.4)
+```
+
+Chains neither stationary nor mixing nor converging. Seeing chains like this implies don't use these chains. 
+
+Again weakly regularizing priors is helpful. 
+
+```{r}
+m9.5 <- ulam(
+  alist(
+    y ~ dnorm(mu, sigma), 
+    mu <- a1 + a2, 
+    a1 ~ dnorm(0, 10), 
+    a2 ~ dnorm(0, 10), 
+    sigma ~ dexp(1)
+  ), data = list(y = y), chains = 3
+)
+precis(m9.5)
+```
+
+Much better now. a1 and a2 still can't be identified separately, but the results are not as terrible as before. 
+ 
+```{r}
+traceplot(m9.5)
+trankplot(m9.5)
+```
+ 
+much better here too. seems stationary, and mixing well. 
+

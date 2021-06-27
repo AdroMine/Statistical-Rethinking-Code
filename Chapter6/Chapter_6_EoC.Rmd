@@ -1,0 +1,480 @@
+---
+title: "Statistical Rethinking Chapter 6 EoC"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, dpi = 150)
+```
+
+# Easy Questions
+
+## 6E1 List three mechanisms by which multiple regression can produce false inferences about causal effects.
+
+- Multicollinearity
+- Post treatment bias
+- Collider bias
+
+## 6E2 For one of the mechanisms in the previous problem, provide an example of your choice, perhaps from your own research.
+
+In the case of predicting defaults for home loans, one of the info used is the original loan amount taken and another is the current loan amount (original - amount already paid). These two are highly correlated, and including them both can lead to erroroneous inferences. 
+
+## 6E3 List the four elemental confounds. Can you explain the conditional dependencies of each?
+
+1. Fork: X <- Z -> Y, a common var Z influences both X and Y, causing correlation between them. 
+2. Pipe: X -> Z -> Y, the real influence between X and Y could be hidden due to Z through which X influences Y. Z could be a post treatment var. 
+3. Collider: X -> Z <- Y: both X and Y influence Z, thus conditioning on Z can lead to statistical association between X and Y even when in reality they are independent of each other. 
+4. Descendant: Same as collider, but Z has a child D that it influences. Conditioning on this child D and lead to similar results as in above. 
+
+## 6E4 How is a biased sample like conditioning on a collider? Think of the example at the open of the chapter.
+
+$$
+X \rightarrow Z \leftarrow Y
+$$
+Z is collider here. If we condition on Z, then knowing X can tell us about Y, for instance in the newsworthiness vs trustworthiness example, if we condition on Selection (only sample from selected), then if N is low implies T must have been high for it to be selected and vice versa. 
+
+# Medium Questions
+
+## 6M1 Modify the DAG on page 186 to include the variable V, an unobserved cause of C and Y: C <- V -> Y. Reanalyze the DAG. How many paths connect X to Y? Which must be closed? Which variables should you condition on now?
+
+```{r}
+library(dagitty) 
+library(ggdag)
+library(rethinking)
+dag_6M1 <- dagitty( "dag {
+                    U [unobserved] 
+                    V [unobserved]
+                    X -> Y 
+                    X <- U <- A -> C -> Y 
+                    U -> B <- C
+                    C <- V -> Y
+                    }")
+coordinates(dag_6M1) <- list(
+  x = c(X = 0, Y = 2, U = 0, B = 1  , C = 2, A = 1  , V = 3),
+  y = c(X = 0, Y = 0, U = 1, B = 0.7, C = 1, A = 1.3, V = 1)
+)
+# ggdag(dag_6M1) + theme_void()
+drawdag(dag_6M1)
+```
+
+Paths here ->
+
+- Y <- C <- A -> U -> X      (Fork + two pipes) (same as before) (needs to be closed)
+- X <- U -> B <- C -> Y      (B is collider)    (same as before) (already closed)
+- X <- U <- A -> C <- V -> Y (C is collider)    (C is thus closed now)
+
+Thus we can condition on A.
+
+```{r}
+adjustmentSets(dag_6M1, exposure = "X", outcome = "Y")
+```
+
+
+## 6M2 Sometimes, in order to avoid multicollinearity, people inspect pairwise correlations among predictors before including them in a model. This is a bad procedure, because what matters is the conditional association, not the association before the variables are included in the model. To highlight this, consider the DAG X → Z → Y. Simulate data from this DAG so that the correlation between X and Z is very large. Then include both in a model prediction Y. Do you observe any multicollinearity? Why or why not? What is different from the legs example in the chapter?
+
+```{r}
+# X -> Z -> Y
+
+set.seed(62)
+x <- rnorm(100, 3, 1)
+z <- 2 * x + rnorm(100)
+y <- 3 * z + rnorm(100, 2, 3)
+
+d <- data.frame(x, y ,z)
+
+m62 <- quap(
+    alist(
+        y   ~ dnorm(mu, sigma), 
+        mu  <- a + bX * x + bZ * z, 
+        a   ~ dnorm(0, 7), 
+        bX  ~ dnorm(0, 7), 
+        bZ  ~ dnorm(0, 7), 
+        sigma ~ dexp(3)
+    ), data = d
+)
+precis(m62)
+
+```
+
+X comes out to be non-significant. This is as we would expect in this situations - a pipe. after conditioning on Z, we don't learn anything new about Y from X. In the case of legs example, both legs were directly influencing final outcome (height). 
+
+
+## 6M3 Learning to analyze DAGs requires practice. For each of the four DAGs below, state which variables, if any, you must adjust for (condition on) to estimate the total causal influence of X on Y.
+
+1. First
+```{r}
+dag1 <- dagitty("dag{
+                 Z <- A -> Y
+                 X <- Z -> Y
+                 X -> Y
+}")
+
+coordinates(dag1) <- list(
+    x = c(Z =  1, A = 2, X = 0, Y = 2), 
+    y = c(Z =  1, A = 1, X = 0, Y = 0)
+)
+
+ggdag(dag1, layout = 'circle') + theme_void()
+```
+
+Paths:
+- X <- Z -> Y      (fork, open, condition on Z)
+- X <- Z <- A -> Y (fork + pipe, open, condition on Z)
+
+```{r}
+adjustmentSets(dag1, exposure = "X", outcome = "Y")
+```
+
+2. Second Dag
+
+```{r}
+dag2 <- dagitty("dag{
+                 Z <- A -> Y
+                 X -> Z -> Y
+                 X -> Y
+}")
+
+coordinates(dag2) <- list(
+    x = c(Z =  1, A = 2, X = 0, Y = 2), 
+    y = c(Z =  1, A = 1, X = 0, Y = 0)
+)
+
+ggdag(dag2, layout = 'circle') + theme_void()
+
+```
+
+Paths: 
+- Y <- X -> Z -> Y      (no backdoor on X)
+- X -> Z <- A -> Y      (collider at Z, fork A) - including Z will show association between X and A, and thereby X and Y. So don't condition on Z.
+
+```{r}
+adjustmentSets(dag2, exposure = "X", outcome = "Y")
+```
+
+3. Third DAG
+```{r}
+dag3 <- dagitty("dag{
+                 Z <- A -> X
+                 X -> Z <- Y
+                 X -> Y
+}")
+
+coordinates(dag3) <- list(
+    x = c(Z =  1, A = 0, X = 0, Y = 2), 
+    y = c(Z =  1, A = 1, X = 0, Y = 0)
+)
+
+ggdag(dag3, layout = 'circle') + theme_void()
+
+```
+
+Paths:
+- X -> Z <- Y (collider at Z, so don't include Z)
+
+```{r}
+adjustmentSets(dag3, "X", "Y")
+```
+
+4. Fourth DAG
+```{r}
+dag4 <- dagitty("dag{
+                 Z <- A -> X
+                 X -> Z -> Y
+                 X -> Y
+}")
+
+coordinates(dag4) <- list(
+    x = c(Z =  1, A = 0, X = 0, Y = 2), 
+    y = c(Z =  1, A = 1, X = 0, Y = 0)
+)
+
+ggdag(dag4, layout = 'circle') + theme_void()
+```
+
+Paths:
+- X -> Z -> Y (pipe) (no backdoor to X)
+- X <- A -> Z -> Y (A forks to X and Z and A pipes to Y, backdoor into X, needs to be closed, condition on A)
+
+```{r}
+adjustmentSets(dag4, "X", "Y")
+```
+
+
+# Hard Questions
+
+## 6H1 Use the Waffle House data, data(WaffleDivorce), to find the total causal influence of number of Waffle Houses on divorce rate. Justify your model or models with a causal graph.
+
+```{r}
+data("WaffleDivorce")
+d <- WaffleDivorce
+
+head(d)
+```
+
+Exposure is WaffleHouses, Outcome is Divorce rate. 
+No of waffle houses would be influenced by the state population, and also by the categorical variable - Southern State, since that is where WaffleHouses started. 
+Moreover, Divorce could be impacted by Median age at marriage and marriage rate as already discussed in earlier chapters, which could likely be influenced by S. 
+
+Let's say the causal chain is like the following:
+
+```{r}
+dagD <- dagitty("dag{
+                W -> D
+                S -> W
+                M -> D
+                A -> D
+                A -> M
+                S -> M
+                S -> A
+}")
+ggdag(dagD, layout = 'circle') + theme_void()
+```
+
+Paths:
+- W <- S -> M -> D        (backdoor, open, condition on S)
+- W <- S -> A -> D        (backdoor, open, condition on S)
+- W <- S -> M <- A -> D   (collider at M, S and A are fork)
+
+We could condition on S, or both A, M.
+
+```{r}
+adjustmentSets(dagD, "W", "D")
+```
+
+Thus building two models, one with W, D and S and another wtih W, D, A and M. 
+
+```{r}
+library(dplyr)
+# first standardise all parameters of interest
+d2 <- d %>% 
+    rename(W = WaffleHouses, 
+           D = Divorce, 
+           A = MedianAgeMarriage, 
+           M = Marriage, 
+           S = South) %>% 
+    mutate(across(c(W, A, M, D), standardize), 
+           S = S + 1)
+
+# model with W, D and S
+mh1 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma), 
+        mu <- a[S] + bW*W,
+        a[S] ~ dnorm(0, 2), 
+        bW ~ dnorm(0, 2), 
+        sigma ~ dexp(1)
+    ), data = d2
+)
+plot(precis(mh1, 2))
+```
+
+W's influence comes to be zero. 
+
+```{r}
+# model with W, D, A and M
+mh2 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma), 
+        mu <- a[S] + bW * W + bA*A + bM * M,
+        a[S] ~ dnorm(0, 2), 
+        c(bA, bM, bW) ~ dnorm(0, 2), 
+        sigma ~ dexp(1)
+    ), data = d2
+)
+plot(precis(mh2, 2))
+```
+
+bW is still zero in this model as well. 
+
+## 6H2 Build a series of models to test the implied conditional independencies of the causal graph you used in the previous problem. If any of the tests fail, how do you think the graph needs to be amended? Does the graph need more or fewer arrows? Feel free to nominate variables that aren’t in the data.
+
+```{r}
+impliedConditionalIndependencies(dagD)
+```
+
+- $A \perp \!\!\! \perp W | S$
+
+```{r}
+h1 <- quap(
+    alist(
+        W ~ dnorm(mu, sigma), 
+        mu <- a + bS * S + bA * A, 
+        a ~ dnorm(0, 2), 
+        c(bS, bA) ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d2
+)
+precis(h1)
+```
+
+bA comes out to be zero after conditioning on S, so we meet the condition. 
+
+Second Condition
+
+- $D \perp \!\!\! \perp S | A, M, W$
+
+```{r}
+h2 <- quap(
+    alist(
+        S ~ dnorm(mu, sigma), 
+        mu <- a + bD*D + bA*A + bM * M + bW*W, 
+        a ~ dnorm(0, 2), 
+        c(bD, bA, bM, bW) ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d2
+)
+precis(h2)
+```
+
+bD comes out to be zero after conditioning on A, M and W. 
+
+- $M \perp \!\!\! \perp W | S$
+
+```{r}
+h3 <- quap(
+    alist(
+        W ~ dnorm(mu, sigma), 
+        mu <- a + bM*M + bS * S, 
+        a ~ dnorm(0, 2), 
+        c(bS, bM) ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d2
+)
+precis(h3)
+```
+
+bM is zero, so we meet the condition. 
+
+
+> Problems on foxes dataset, 
+ - 116 foxes from 
+ - 30 different urban groups in England (2-8 foxes / group)
+ - `area` signifies territory of each fox group
+ - some territories have more `avgfood`
+ - need to model `weight` of each fox
+
+Assume Following DAG
+
+```{r echo=FALSE}
+foxdag <- dagitty("dag{
+                  area -> avgfood
+                  weight <- avgfood -> groupsize
+                  groupsize -> weight
+}")
+coordinates(foxdag) <- list(
+    x = c(area = 1, avgfood = 0, groupsize = 2, weight = 1),
+    y = c(area = 2, avgfood = 1, groupsize = 1, weight = 0)
+)
+
+ggdag(foxdag, layout = 'circle', node_size = 0, text_col = "black") + theme_void()
+```
+
+
+## 6H3 Use a model to infer the total causal influence of area on weight. Would increasing the area available to each fox make it heavier (healthier)? You might want to standardize the variables. Regardless, use prior predictive simulation to show that your model’s prior predictions stay within the possible outcome range.
+
+```{r}
+data(foxes)
+
+d <- foxes %>% 
+    mutate(across( c(avgfood:weight), standardize)) # not standardising groupsize
+
+mh3 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma), 
+        mu <- a + bA * area, 
+        a  ~ dnorm(0, 1), 
+        bA ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+plot(precis(mh3))
+```
+
+Size of area has no influence on weight of foxes. 
+
+Prior predictive simulation
+
+```{r}
+
+area <- seq(-3, 3, length.out = 30)                        # simulated Area values
+priors <- extract.prior(mh3)                               # extract prior values
+mu <- link(mh3, data = list(area = area), post = priors)   # get weight values for priors
+
+
+# get them back on original scale
+A <- area * attributes(d$area)[[2]] + attributes(d$area)[[1]]                              
+W <- apply(mu, 1:2, function(x) x * attributes(d$weight)[[2]] + attributes(d$weight)[[1]]) 
+
+# Plot the result
+
+plot( NULL , xlim = range(A) , ylim = range(W) , xlab = "area" , ylab = "weight")
+abline(h = 0, col = 'red', lwd = 2)    # weight cannot be negative                        
+abline(h = 10, col = 'red', lwd = 2)   # usually foxes weight till 9.5 kg according to google info box
+for(i in 1:30){
+    # draw regression lines for each prior 
+    lines(A, W[i,], col = col.alpha('black', 0.3))
+}
+```
+
+The priors seems good enough at keeping results within the boundary of possible values.
+
+
+## 6H4 Now infer the causal impact of adding food to a territory. Would this make foxes heavier? Which covariates do you need to adjust for to estimate the total causal influence of food?
+
+Paths - 
+- avgfood -> Weight (direct path)
+- avgfood -> groupsize -> weight (pipe, adding groupsize would block the path)
+
+```{r}
+adjustmentSets(foxdag, "avgfood", 'weight')
+```
+
+So no need to add anything. 
+
+```{r}
+mh4 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma), 
+        mu <- a + bA * avgfood, 
+        a  ~ dnorm(0, 1), 
+        bA ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+plot(precis(mh4))
+```
+
+Similar to area, there is no effect on weight of foxes if we add food to a territory. 
+
+## 6H5 Now infer the causal impact of group size. Which covariates do you need to adjust for? Looking at the posterior distribution of the resulting model, what do you think explains these data? That is, can you explain the estimates for all three problems? How do they go together?
+
+Paths -
+- groupsize -> weight (direct path)
+- weight <- groupsize <- avgfood -> weight  (fork from avgfood, this is backdoor into groupsize, to block it we need to include avgfood)
+
+```{r}
+adjustmentSets(foxdag, "groupsize", 'weight')
+```
+
+```{r}
+mh5 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma), 
+        mu <- a + bA * avgfood + bG* groupsize, 
+        a  ~ dnorm(0, 1), 
+        c(bA, bG) ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+plot(precis(mh5))
+```
+
+Increasing groupsize reduce health of foxes, and increasing avgfood increases it according to this model now. 
+Greater quantity of food increases health is self-explanatory, large quantities of food probably attract more foxes as well leading to increased size, but greater group size leads to reduced health since the same quantity of food now needs to be divided among more foxes. 
+
+groupsize and avgfood work in opposite direction, so it is only when we include both that we get their real effect. In 6H4, by having only avgfood as predictor, the negative effect of increasing groupsize (due to increasing avgfood) lead to an overall zero effect on health of foxes. The two tend to mask each other's effect. 
+

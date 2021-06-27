@@ -1,0 +1,562 @@
+---
+title: "Statistical Rethinking Chapter 5: EoC Questions"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Easy Problems
+
+## 5E1 Which of the linear models below are multiple linear regressions?
+
+$$
+\begin{align}
+
+(1)\quad \mu_i &= \alpha + \beta x_i \\
+(2)\quad \mu_i &= \beta_x x_i + \beta_z z_i \\
+(3)\quad \mu_i &= \alpha + \beta(x_i - z_i) \\
+(4)\quad \mu_i &= \alpha + \beta_x x_i + \beta_z z_i 
+\end{align}
+$$
+Answers - 
+
+1. Simple Linear Regression (only var), 
+2. Yes, two vars x and z, 
+3. Simple Linear Regression only one var (x - z is a third var that is a linear combo of both)
+4. Yes, two vars x and z, similar to 2 but has intercept as well. 
+
+
+## 5E2 Write down a multiple regression to evaluate the claim: Animal diversity is linearly related to latitude, but only after controllin for plant diversity. You just need to write down the model definition. 
+
+$$
+\begin{align}
+
+AnimalDiversity = \alpha + \beta_1 Latitude + \beta_2 PlantDiversity
+
+\end{align}
+
+$$
+
+## 5E3 Write down a multiple regression to evaluate the claim: Neither amount of funding nor size of laboratory is by itself a good predictor of time to PhD degree; but together these variables are both positively associated with time to degree. Write down the model definition and indicate which side of zero each slope parameter should be on.
+
+$$
+
+\begin{align}
+
+\operatorname{Time\_to\_Degree} &= \alpha + \beta Funding \tag*{(Will not show relation)}  \\  
+\operatorname{Time\_to\_Degree} &= \alpha + \beta LabSize \tag*{(Will not show relation)}  \\
+
+\operatorname{Time\_to\_Degree} &= \alpha + \beta_1 Funding  + \beta_2 LabSize \tag*{(Will show relation)} \\  
+
+\end{align}
+
+
+$$
+
+## 5E4 Suppose you have a single categorical predictor with 4 levels (unique values), labeled A, B, C and D. Let Ai be an indicator variable that is 1 where case _i_ is in category A. Also suppose Bi, Ci, and Di for the other categories. Now which of the following linear models are inferentially equivalent ways to include the categorical variable in a regression? Models are inferentially equivalent when it’s possible to compute one posterior distribution from the posterior distribution of another model
+
+$$
+
+\begin{align}
+
+(1)\quad \mu_i &= \alpha + \beta_A A_i + \beta_B B_i + \beta_D D_i \\
+(2)\quad \mu_i &= \alpha + \beta_A A_i + \beta_B B_i + \beta_C C_i + \beta_D D_i \\
+(3)\quad \mu_i &= \alpha + \beta_B B_i + \beta_C C_i + \beta_D D_i \\
+(4)\quad \mu_i &= \alpha_A A_i + \alpha_B B_i + \alpha_C C_i + \alpha_D D_i \\
+(5)\quad \mu_i &= \alpha_A (1 - B_i - C_i - D_i) + \alpha_B B_i + \alpha_C C_i + \alpha_D D_i
+\end{align}
+
+$$
+
+
+- 1 and 3 are equal (they have n-1 dummy categories)
+- 4, and 5 are equal (where they are using index variable approach)
+- 2 uses all dummy categories (will run into multi-collinearity issue)
+
+every model except 2 should provide similar posterior. 
+
+# Medium Problems
+
+## 5M1 Invent your own example of a spurious correlation. An outcome variable should be correlated with both predictor variables. But when both predictors are entered in the same model, the correlation between the outcome and one of the predictors should mostly vanish (or at least be greatly reduced).
+
+Spurious correlation implies two variables seems to be correlated while in actual they are not. It could be due to a third variable influencing both. Let us simulate the same and build models to test it out. 
+
+```{r}
+x1 <- rnorm(100)
+x2 <- rnorm(100, x1)
+x3 <- rnorm(100, x1)
+
+df <- data.frame(x1 = x1, 
+                 x2 = x2, 
+                 x3 = x3)
+```
+
+Here both x2 and x3 are related to x1. 
+
+```{r}
+round(cor(df), 3)
+```
+
+Let us build a model regressing first x3 on x2 alone. 
+
+```{r}
+library(rethinking)
+m1 <- quap(
+    alist(
+        x3 ~ dnorm(mu, sigma), 
+        mu <- a + b2 * x2, 
+        a ~ dnorm(0, 10), 
+        b2 ~ dnorm(0, 10), 
+        sigma ~ dexp(1)
+    ), data = df
+)
+precis(m1)
+```
+
+b2 has a significantly positive coefficient. 
+
+Next let us build a model with both x1 and x2 as predictors. 
+
+```{r}
+m2 <- quap(
+    alist(
+        x3 ~ dnorm(mu, sigma), 
+        mu <- a + b1*x1 + b2 * x2, 
+        a ~ dnorm(0, 10), 
+        b1 ~ dnorm(0, 10), 
+        b2 ~ dnorm(0, 10), 
+        sigma ~ dexp(1)
+    ), data = df
+)
+precis(m2)
+```
+
+Now only x1's beta has a significant coefficient while x2's coefficient reduces to zero. 
+
+```{r}
+plot(coeftab(m1, m2), pars = c("b1", "b2"))
+```
+
+
+## Invent your own example of a masked relationship. An outcome variable should be correlated with both predictor variables, but in opposite directions. And the two predictor variables should be correlated with one another.
+
+Simulating a masked relationship:
+
+```{r}
+set.seed(456)
+n <- 100
+x1 <- rnorm(n)
+x2 <- rnorm(n, x1)
+x3 <- rnorm(n, x2 - x1)  # x2-x1, since relationship with two predictors has to be in opposite direction
+df <- data.frame(x1, x2, x3)
+```
+
+Creating models with individual vars and the two together. 
+
+```{r}
+
+m2_1 <- quap(
+    alist(
+        x3 ~ dnorm(mu, sigma), 
+        mu <- a + b1 * x1, 
+        a ~ dnorm(0, 10), 
+        b1 ~ dnorm(0, 10), 
+        sigma ~ dexp(2)
+    ), data = df
+)
+
+m2_2 <- quap(
+    alist(
+        x3 ~ dnorm(mu, sigma), 
+        mu <- a + b2 * x2, 
+        a ~ dnorm(0, 10), 
+        b2 ~ dnorm(0, 10), 
+        sigma ~ dexp(3)
+    ), data = df
+)
+
+m2_3 <- quap(
+    alist(
+        x3 ~ dnorm(mu, sigma), 
+        mu <- a + b1 * x1 + b2 * x2, 
+        a ~ dnorm(0, 10), 
+        b1 ~ dnorm(0, 10), 
+        b2 ~ dnorm(0, 10), 
+        sigma ~ dexp(1)
+    ), data = df
+)
+plot( coeftab(m2_1, m2_2, m2_3), pars = c("b1", 'b2'))
+```
+
+The slopes of both b1 and b2 become more significant when including both. 
+
+## 5M3 It is sometimes observed that the best predictor of fire risk is the presence of firefighters — States and localities with many firefighters also have more fires. Presumably firefighters do not cause fires. Nevertheless, this is not a spurious correlation. Instead fires cause firefighters. Consider the same reversal of causal inference in the context of the divorce and marriage data. How might a high divorce rate cause a higher marriage rate? Can you think of a way to evaluate this relationship, using multiple regression?
+
+Here we are talking about higher divorce leading to higher marriage rate. 
+
+$$
+\operatorname{Divorce} \rightarrow \operatorname{Marriage}
+$$
+It could be that some people are more inclined towards marriage, and would be more ready to marrying again after divorce. We would like to control for the effect of this variable. A helpful stat would be the rate of remarriage rate. 
+
+
+$$
+
+\begin{align}
+
+MarriageRate &\sim Normal(mu, sigma) \\
+mu &= \alpha + \beta_1 DivorceRate + \beta_2 \operatorname{RemarriageRate} \\
+\cdots
+
+\end{align}
+$$
+
+Here, we are regressing marriage rate on both divorce rate and remarriage rate which would control for the effect of some people having higher rates of marriage. After running this regression, if remarriage rate is significant while divorce rate is not, that would imply that the hypothesised causal relationship from divorce rate to marriage rate was incorrect. 
+
+
+## 5M4 In the divorce data, States with high numbers of members of the Church of Jesus Christ of Latter-day Saints (LDS) have much lower divorce rates than the regression models expected. Find a list of LDS population by State and use those numbers as a predictor variable, predicting divorce rate using marriage rate, median age at marriage, and percent LDS population (possibly standardized). You may want to consider transformations of the raw percent LDS variable.
+
+First let us get the data from [Wikipedia page](https://en.wikipedia.org/wiki/The_Church_of_Jesus_Christ_of_Latter-day_Saints_membership_statistics_(United_States)). This is actually from 2019, while the WaffleDivorce dataset has statistics from 2010, but we will make do with this for now. 
+
+
+
+```{r}
+library(rvest)
+library(dplyr, warn.conflicts = FALSE, quietly = TRUE)
+library(readr)
+church_pop <- read_html("https://en.wikipedia.org/wiki/The_Church_of_Jesus_Christ_of_Latter-day_Saints_membership_statistics_(United_States)") %>% 
+    html_table()
+idx <- which(sapply(church_pop, function(x) names(x)[[1]] == "State"))
+church_pop <- church_pop[[idx]] %>% 
+    select(State, LDS) %>% 
+    mutate(LDS = readr::parse_number(LDS) / 100 * 1000) # convert to number, % to decimal then to per 1000 rate
+    
+data("WaffleDivorce")
+d <- WaffleDivorce
+
+d2 <- left_join(d, church_pop, by = c("Location" = "State"))
+
+# standardise LDS
+
+d2$M <- standardize(d2$Marriage)
+d2$A <- standardize(d2$MedianAgeMarriage)
+d2$D <- standardize(d2$Divorce)
+d2$L <- standardize(d2$LDS)
+```
+
+
+Now we will model the following relationship:
+
+
+$$
+\begin{align}
+
+D &\sim Normal(mu, sigma) \\
+mu &= a + bA * A + bM * M + bL * L \\
+a &\sim Normal(0, 10) \\
+bA &\sim Normal(0, 10) \\
+bM &\sim Normal(0, 10) \\
+bL &\sim Normal(0, 10) \\
+sigma &\sim Exponential(1)
+
+\end{align}
+$$
+
+```{r}
+m4 <- quap(
+    alist(
+        D ~ dnorm(mu, sigma), 
+        mu <- a + bA * A + bM * M + bL * L, 
+        a ~ dnorm(0, 10), 
+        bA ~ dnorm(0, 10), 
+        bM ~ dnorm(0, 10), 
+        bL ~ dnorm(0, 10), 
+        sigma ~ dexp(2)
+    ), data = d2
+)
+
+precis(m4)
+```
+
+Similar to previous regressions in the chapter, median age is negative (even more so now), marriage rate is even closer to zero now, and the new variable, the number of people associated with the Church of Jesus Christ of Latter-day Saints is significant and negative, implying lower number of LDS people in state leads to higher divorces. 
+
+## 5M5 One way to reason through multiple causation hypotheses is to imagine detailed mechanisms through which predictor variables may influence outcomes. For example, it is sometimes argued that the price of gasoline (predictor variable) is positively associated with lower obesity rates (outcome variable). However, there are at least two important mechanisms by which the price of gas could reduce obesity. First, it could lead to less driving and therefore more exercise. Second, it could lead to less driving, which leads to less eating out, which leads to less consumption of huge restaurant meals. Can you outline one or more multiple regressions that address these two mechanisms? Assume you can have any predictor data you need.
+
+$$
+
+Obesity = \alpha + \beta_1 GasolinePrice + \beta_2 DrivingTimePerMonth + \beta_3 RestaurantMealsPerMonth
+
+$$
+
+
+
+# Hard Questions
+
+## 5H1 In the divorce example, suppose the DAG is: M -> A -> D. What are the implied conditional independencies of the graph? Are the data consistent with it?
+
+```{r}
+library(dagitty)
+dag1 <- dagitty('dag{M -> A -> D}')
+impliedConditionalIndependencies(dag1)
+```
+
+Thus teh implied conditional independencies here is that D is independent of M conditional on A, i.e. M tells us nothing new about D after we know A. We can test this using a multiple regression model, in fact this has been tested in the chapter. 
+
+We can check the Markov equivalents of this DAG. We see that the second one is the one used in the book.
+
+```{r}
+# equivalentDAGs(dag1)
+par(mfrow = c(3, 1))
+lapply(equivalentDAGs(dag1), plot)
+```
+
+
+
+## 5H2 Assuming that the DAG for the divorce example is indeed M -> A -> D, fit a new model and use it to estimate the counterfactual effect of halving a State’s marriage rate M. Use the counterfactual example from the chapter (starting on page 140) as a template.
+
+```{r}
+data(WaffleDivorce)
+d <- list()
+
+d$A <- standardize(WaffleDivorce$MedianAgeMarriage)
+d$D <- standardize(WaffleDivorce$Divorce)
+d$M <- standardize(WaffleDivorce$Marriage)
+
+m5h2 <- quap(
+    alist(
+        ## M -> A -> D
+        D ~ dnorm(mu, sigma), 
+        mu <- a + bM * M + bA * A, 
+        a ~ dnorm(0, 0.2), 
+        bM ~ dnorm(0, 0.5), 
+        bA ~ dnorm(0, 0.5), 
+        sigma ~ dexp(1), 
+        ## M -> A
+        A ~ dnorm(mu_A, sigma_A), 
+        mu_A <- aA + bMA * M, 
+        aA ~ dnorm(0, 0.2), 
+        bMA ~ dnorm(0, 0.5), 
+        sigma_A ~ dexp(1)
+    ), data = d
+)
+precis(m5h2)
+
+M_seq <- seq(from = -2, to = 2, length.out = 30)
+```
+
+
+General counterfactual effect of M on A and D
+
+```{r}
+# prep data 
+sim_dat <- data.frame( M=M_seq )
+# simulate M and then D, using A_seq 
+s <- sim( m5h2 , data=sim_dat , vars=c("A","D") ) # vars tells which variables to simulate and in which order
+
+par(mfrow = c(1, 2))
+plot( sim_dat$M , colMeans(s$D) , ylim=c(-2,2) , type="l" , 
+      xlab="manipulated M" , ylab="counterfactual D" )
+shade( apply(s$D,2,PI) , sim_dat$M ) 
+mtext( "Total counterfactual effect of A on D" )
+
+plot(sim_dat$M, colMeans(s$A), ylim = c(-2, 2), type = "l", xlab = "manipulated M", ylab = "counterfactual A")
+shade( apply(s$A, 2, PI), sim_dat$M)
+mtext( "Counterfactual effect M -> A" )
+```
+
+For effect of halving marriage rate, we can halve the marriage rate of each state, compute posterior distribution of Divorce using these new marriage rates and our previously built model and finally see the distribution of differences between the predicted divorce rates for our original and halved marriage rates. 
+
+```{r}
+center <- attr(d$M, "scaled:center")
+scale <- attr(d$M, "scaled:scale")
+
+d2 <- WaffleDivorce %>% 
+    select(Location, Divorce, Marriage) %>% 
+    mutate(HM = Marriage / 2, 
+           HM = (HM - center) / scale, 
+           M = standardize(Marriage))
+
+s_half <- sim(m5h2, data = list(M = d2$HM), vars = c("A", "D"))
+s_full <- sim(m5h2, data = list(M = d2$M), vars = c("A", "D"))
+d2 <- d2 %>% 
+    mutate(HD = colMeans(s_half$D), 
+           HD2 = HD * scale + center, 
+           FD = colMeans(s_full$D), 
+           FD2 = FD * scale + center)
+
+summary(d2$HD - d2$FD)
+summary(d2$HD2 - d2$FD2)
+```
+
+Thus, halving the marriage rate seems to have reduced the divorce rate by 0.6 to 1.4 standard deviations (or 2.5 to 5.6 persons per 1000). 
+
+## 5H3 Return to the milk energy model, m5.7. Suppose that the true causal relationship among the variables is:
+
+> M -> N
+> M -> K
+> N -> K
+
+## Now compute the counterfactual effect on K of doubling M. You will need to account for both the direct and indirect paths of causation. Use the counterfactual example from the chapter (starting on page 140) as a template.
+
+```{r}
+data(milk) 
+d <- milk 
+d$K <- standardize( d$kcal.per.g ) 
+d$N <- standardize( d$neocortex.perc ) 
+d$M <- standardize( log(d$mass) )
+
+dcc <- d[complete.cases(d$K, d$N, d$M), ]
+
+m5h3 <- quap( 
+    alist( 
+        # M -> N -> K
+        K ~ dnorm( mu , sigma ) , 
+        mu <- a + bN*N + bM*M ,
+        a ~ dnorm( 0 , 0.2 ) ,
+        bN ~ dnorm( 0 , 0.5 ) ,
+        bM ~ dnorm( 0 , 0.5 ) ,
+        sigma ~ dexp( 1 ), 
+        # M -> N
+        N ~ dnorm(mu_N, sigma_N), 
+        mu_N <- aN + bMN * M, 
+        aN ~ dnorm(0, 0.5), 
+        bMN ~ dnorm(0, 0.5),
+        sigma_N <- dexp(1)
+    ) ,
+    data=dcc 
+)
+```
+
+We have created the model, let us create the counterfactual plots now to see the effect of manipulating M. 
+
+```{r}
+M_seq <- seq(-2, 2, length.out = 30)
+
+sim_dat <- sim(m5h3, data = list(M = M_seq), vars = c("N", "K"))
+
+par(mfrow = c(1, 2))
+plot(x = M_seq, y = colMeans(sim_dat$K), type = "l", ylim = c(-2, 2), 
+     xlab = "Manipulated M", ylab = "Total CounterfactualK")
+shade(apply(sim_dat$K, 2, PI), M_seq)
+mtext("Total Counterfactual effect of M on K")
+
+plot(x = M_seq, y = colMeans(sim_dat$N), type = 'l', ylim = c(-2, 2), 
+     xlab = "Manipulated M", ylab = "Counterfactual N")
+shade(apply(sim_dat$N, 2, PI), M_seq)
+mtext("Counterfactual effect M ->K")
+```
+
+Now let us check the effect of doubling M on K. 
+
+```{r}
+centre <- attr(d$M, "scaled:center")
+scale <- attr(d$M, "scaled:scale")
+
+d2 <- dcc %>% 
+    select(kcal.per.g, neocortex.perc, mass) %>% 
+    mutate(mass = log(mass), 
+           m2 = mass * 2, 
+           M2 = (m2 - centre) / scale)
+
+sim_double <- sim(m5h3, list(M = d2$M2), vars = c("N", 'K'))
+sim_orig   <- sim(m5h3, list(M = dcc$M), vars = c("N", 'K'))
+
+
+d3 <- d2 %>% 
+    mutate(K2 = colMeans(sim_double$K), 
+           kc2 = K2 * scale + centre, 
+           K  = colMeans(sim_orig$K), 
+           kc =  K  * scale + centre)
+
+summary(d3$K2 - d3$K)
+summary(d3$kc2 - d3$kcal.per.g)
+```
+
+Doubling the mass can cause a K to decrease by -0.79 std to +0.34 std. 
+or -1.13 kcal/g to 2.3 kcal/g. 
+
+
+## 5H4 Here is an open practice problem to engage your imagination. In the divorce date, States in the southern United States have many of the highest divorce rates. Add the South indicator variable to the analysis. First, draw one or more DAGs that represent your ideas for how Southern American culture might influence any of the other three variables (D,Mor A). Then list the testable implications ofyour DAGs, if there are any, and fit one or more models to evaluate the implications. What do you think the influence of “Southerness” is?
+
+Southerness could probably influence M and/or A. 
+
+```{r}
+# M <- S -> A
+# D <- A -> M
+
+par(mfrow = c(1,1))
+
+dag4 <- dagitty( "dag{
+                   M <- S -> A
+                   D <- A -> M
+                   D <- M
+                   S <- D
+                 }")
+coordinates(dag4) <- list(x = c(S = 1, M = 2, A = 0, D = 1), 
+                          y = c(S = 0, M = 1, A = 1, D = 2))
+plot(dag4)
+```
+
+Testable implications:
+
+- $S \not\!\perp\!\!\!\perp A$ 
+- $S \not\!\perp\!\!\!\perp M$ 
+- $S \not\!\perp\!\!\!\perp D$
+
+The rest are the same as in the chapter. 
+
+```{r}
+data("WaffleDivorce")
+d <- WaffleDivorce %>% 
+    select(Divorce, Marriage, MedianAgeMarriage, South) %>% 
+    mutate(across(Divorce:MedianAgeMarriage, standardize)) %>% # standardize the numerical ones %>% 
+    mutate(South = ifelse(South == 0, 1, 2)) %>% 
+    rename(M = Marriage, D = Divorce, A = MedianAgeMarriage, S = South)
+round(cor(d), 2)
+```
+
+South does seem to be related to Divorce and Age, but it's relationship with Marriage is mostly non-existent.
+
+Let us fit a multiple regression model to model Divorce using all the three as predictors, and compare to a model without South. For South we will use the index variable approach. 
+
+```{r}
+m5h4_F <- quap(
+    alist(
+        D ~ dnorm(mu, sigma), 
+        mu <- a[S] + bM*M + bA*A,
+        a[S]  ~ dnorm(0, 1), 
+        bM    ~ dnorm(0, 1), 
+        bA    ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+precis(m5h4_F, depth = 2)
+```
+
+a[1] and a[2] that represent the two paramters for `South` have zero in their credible interval and thus we can conclude that they do not provide us any extra information after conditioning on Marriage Rate and Median Age at marriage. 
+
+
+We can compare the coefficients for M and A with a model without `South`. 
+
+```{r}
+m5h4_A <- quap(
+    alist(
+        D ~ dnorm(mu, sigma), 
+        mu <- a + bM*M + bA*A,
+        a     ~ dnorm(0, 1), 
+        bM    ~ dnorm(0, 1), 
+        bA    ~ dnorm(0, 1), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+plot(coeftab(m5h4_F, m5h4_A))
+```
+
+As can be seen, there's only very slight differnce in the parameter's values. 

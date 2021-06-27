@@ -1,0 +1,843 @@
+---
+title: 'Rethinking: Chapter 4 EoC Questions'
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Easy Questions
+
+### 4E1 In the model definition below, which line is the likelihood?
+
+$$
+y_i \sim Normal(\mu, \sigma) \\
+\mu \sim Normal(0, 10)  \\
+\sigma \sim Exponential(1)
+$$
+
+The first line is the likelihood.
+
+### 4E2 In the model definition just above, how many parameters are in the posterior distribution?
+
+2 parameters, $\mu$ and $\sigma$
+
+### 4E3 Using the model definition above, write down the appropriate form of Baye's theorem that includes the proper likelihood and priors.
+
+$$
+Pr(\mu, \sigma | y_i) = \frac{Normal(y_i| \mu, \sigma)\ Uniform(\mu|0, 10) \ Exponential(\sigma, | 1)}{\int Normal(y_i| \mu, \sigma)\ Uniform(\mu|0, 10) \ Exponential(\sigma, | 1)\ d\mu d\sigma}
+$$
+
+### 4E4 In the model definition below, which line is the linear model?
+
+$$
+\begin{align}
+y_i &\sim Normal(\mu, \sigma) \\
+\mu_i &= \alpha + \beta x_i \\
+\alpha &\sim Normal(0, 10) \\
+\beta &\sim Normal(0, 1) \\
+\sigma &\sim Exponential(2)
+\end{align}
+$$
+
+the second line relating $\mu_i$ with $\alpha$ and $\beta$
+
+### 4E5 In the model definition above, how many parameters are in the posterior distribution?
+
+3, $\alpha$, $\beta$ , and $\sigma$
+
+# Medium Questions
+
+### 4M1 For the model definition below, simulate observed y values from the prior (not the posterior)
+
+$$
+\begin{align}
+y_i &\sim Normal(\mu, \sigma) \\
+\mu &\sim Normal(0, 10) \\
+\sigma &\sim Exponential(1)
+\end{align}
+$$
+
+```{r}
+library(rethinking)
+
+# prior for mu
+curve(dnorm(x, 0, 10), from = -30, to = 30)
+
+# simulating y values from the prior
+sample_mu <- rnorm(1e4, mean = 0, sd = 10)
+sample_sigma <- rexp(1e4, 1)
+sample_y <- rnorm(1e4, sample_mu, sample_sigma)
+dens(sample_y)
+```
+
+### 4M2 Translate the model just above into a quap formula
+
+```{r eval = FALSE}
+
+formula <- alist(
+    y ~ dnorm(mu, sigma), 
+    mu ~ dnorm(0, 10), 
+    sigma ~ dexp(1)
+)
+```
+
+### 4M3 Translate the quap model formula below into a mathematical model definition.
+
+```{r}
+alist(
+    y ~ dnorm(mu, sigma), 
+    mu <- a + b*x, 
+    a ~ dnorm(0, 10), 
+    b ~ dunif(0, 1), 
+    sigma ~ dexp(1)
+)
+```
+
+$$
+\begin{align}
+y &\sim Normal(\mu, \sigma) \\
+\mu &= a + bx \\
+a &\sim Normal(0, 10) \\
+b &\sim Uniform(0, 1) \\
+sigma &\sim Exponential(1)
+\end{align}
+$$
+
+### 4M4 A sample of students is measured for height each year for 3 years. After the third year, you want to fit a linear regression predicting height using year as a predictor. Write down the mathematical model definition for this regression, using any variable names and priors you choose. Be prepared to defend your choice of priors.
+
+Students can be both boys and girls and ranging from the age let's say 6 to 18. From this [source](https://childrenswi.org/medical-care/adolescent-health-and-medicine/issues-and-concerns/adolescent-growth-and-development/normal-growth), this means that the average height can range from 120cm to 190cm. Moreover, the yearly growth can range from 0 to 7 cm. [source2](https://www.verywellfamily.com/normal-growth-of-young-children-2632414). This growth rate cannot be negative.
+
+The following model considers height is normally distributed and creates a linear relationship with the year the height was measured in. Thus the $\alpha$, the intercept term, captures the average height of all students, and $\beta$, the yearly growth rate. The $\sigma$ is assumed to be uniformly distributed with a very wide interval to capture all the age groups.
+
+$$
+\begin{align}
+height &\sim Normal(\mu, \sigma) \\
+\mu &= \alpha + \beta \ t_i  \\
+\alpha &\sim Normal(155, 20) \\
+\beta &\sim \operatorname{Log-Normal} (0,1) \\
+\sigma &\sim Uniform(0, 50)
+\end{align}
+$$
+
+Checking the prior distributions and simulating the heights using them:
+
+```{r}
+samples_alpha = rnorm(1e4, 155, 20)
+samples_beta = rlnorm(1e4, 0, 1)
+samples_sigma = runif(1e4, 0, 50)
+
+# for year 1, 2, 3
+samples_mu1 = samples_alpha + samples_beta
+samples_mu2 = samples_alpha + samples_beta * 2
+samples_mu3 = samples_alpha + samples_beta * 3
+
+# simulated heights for years 1, 2, 3
+simulated_heights1 = rnorm(1e4, samples_mu1, samples_sigma)
+simulated_heights2 = rnorm(1e4, samples_mu2, samples_sigma)
+simulated_heights3 = rnorm(1e4, samples_mu3, samples_sigma)
+
+# check simulated heights
+dens(simulated_heights1)
+PI(simulated_heights1, 0.97)
+PI(simulated_heights2, 0.97)
+PI(simulated_heights3, 0.97)
+```
+
+### 4M5 Now suppose I remind you that every student got taller each year. Does this information lead you to change your choice of priors? How?
+
+Since students got "taller", we assume positive growth rates only, which we have already taken care of above using log-normal distribution for growth rates.
+
+### 4M6 Now suppose I tell you that the variance among heights for students of the same age is never more than 64cm. How does this lead you to revise your priors?
+
+Variance of 64 implies a sigma of 8. So we can update our prior for $\sigma$
+
+$$
+\sigma \sim Uniform(0, 8)
+$$
+
+### 4M7 Refit model m4.3 from the chapter, but omit the mean weight xbar this time. Compare the new model's posterior to that of the original model. In particular, look at the covariance among the parameters. What is different? Then compare the posterior predictions of both models.
+
+```{r}
+data(Howell1); 
+d <- Howell1; 
+d2 <- d[ d$age >= 18 , ]
+
+xbar <- mean(d2$weight)
+
+m4.3 <- quap( 
+    alist(
+        height ~ dnorm( mu , sigma ) , 
+        mu <- a + b * ( weight - xbar) ,
+        a ~ dnorm( 178 , 20 ) ,
+        b ~ dlnorm( 0 , 1 ) ,
+        sigma ~ dunif( 0 , 50 )
+    ) , 
+    data=d2 
+)
+
+
+m4.3n <- quap( 
+    alist(
+        height ~ dnorm( mu , sigma ) , 
+        mu <- a + b * ( weight ) ,
+        a ~ dnorm( 178 , 20 ) ,
+        b ~ dlnorm( 0 , 1 ) ,
+        sigma ~ dunif( 0 , 50 )
+    ) , 
+    data=d2 
+)
+
+precis(m4.3)
+precis(m4.3n)
+```
+
+The $\alpha$ parameter has changed since weight is not centered anymore. Earlier, it was the average height when $x - \bar x$ was equal to 0, now it is the average height when the actual weight is zero.
+
+```{r}
+round(vcov(m4.3), 3)
+round(vcov(m4.3n), 3)
+
+round(cov2cor(vcov(m4.3)) , 3)
+round(cov2cor(vcov(m4.3n)), 3)
+```
+
+The covariance is much higher for the new model. If we look at the correlation, we see that the $\alpha$ and $\beta$ parameters are highly correlated together. The higher covariance can be explained since the weight parameter is not centered anymore and hence has more variation.
+
+```{r}
+pairs(m4.3)
+pairs(m4.3n)
+```
+
+Comparing posterior predictions of the two models.
+
+```{r}
+weight.seq <- seq( from=25 , to=70 , by=1 )
+dw <- data.frame(weight = weight.seq)
+
+plot_wt_posterior <- function(model){
+    mu <- link(model, dw)
+    mu.mean <- apply(mu, 2, mean)
+    mu.PI <- apply(mu, 2, PI)
+    
+    sim.h <- sim(model, dw)
+    height.PI <- apply(sim.h, 2, PI)
+    
+    plot( height ~ weight , d2 , col=col.alpha(rangi2,0.5), pch = 20)
+    lines( weight.seq , mu.mean )
+    shade( mu.PI , weight.seq, col = col.alpha('green') )
+    shade( height.PI , weight.seq , col = col.alpha('red'))
+}
+
+par(mfrow = c(1, 2))
+plot_wt_posterior(m4.3)
+plot_wt_posterior(m4.3n)
+par(mfrow = c(1,1))
+```
+
+The posterior predictions look to be the same. The figure on the left is the posterior prediction from the original model, while the one on the right is from the new model.
+
+### 4M8 In the chapter, we used 15 knots with the cherry blossom spline. Increase the number of knots and observe what happens to the resulting spline. Then adjust also the width of the prior on the weights -- change the standard deviation of the prior and watch what happens. What do you think the combination of knot number and the prior on the weights controls?
+
+```{r}
+data("cherry_blossoms")
+d <- cherry_blossoms
+
+d2 <- d[ complete.cases(d$doy) , ] # complete cases on doy 
+
+library(splines) 
+cherry_splines_model <- function(knots = 15){
+    num_knots <- knots
+    knot_list <- quantile( d2$year , probs=seq(0,1,length.out=num_knots) )
+    
+    B <- bs(d2$year,
+            knots=knot_list[-c(1,num_knots)] , 
+            degree=3 , intercept=TRUE )
+    
+    # create model
+    
+    m4.7 <- quap( 
+        alist( D ~ dnorm( mu , sigma ) ,
+               mu <- a + B %*% w ,
+               a ~ dnorm(100,10),
+               w ~ dnorm(0, 10),
+               sigma ~ dexp(1)
+        ),
+        data = list( D = d2$doy , B = B ) ,
+        start = list( w = rep( 0 , ncol(B) ) ) )
+    return(list(model = m4.7, knot_list = knot_list, B = B))
+}
+
+plot_basis_splines <- function(model, knot_list, B = B){
+    # plotting posterior distribution
+    post <- extract.samples( model )
+    w <- apply( post$w , 2 , mean )
+    
+    # Plot the basis functions * weights calculated using quap
+    plot( NULL , xlim=range(d2$year) , ylim=c(-6,6) , 
+          xlab="year" , ylab="basis * weight" )
+    for ( i in 1:ncol(B) ) 
+        lines( d2$year , w[i]*B[,i] , col = col.alpha(i, 0.7), lwd = 4)
+    points(knot_list, y = rep(6, length(knot_list)), pch = 3)
+}
+
+plot_posterior_predictions <- function(model, B = B, text = ncol(B)){
+    # Posterior interval for mu (97%)
+    mu <- link( model )
+    mu_mean <- apply(mu, 2, mean)
+    mu_PI <- apply(mu,2,PI,0.97)
+    
+    doy <- sim(model, list( D = d2$doy , B = B ))
+    doy_h <- apply(doy, 2, PI, 0.97)
+    
+    plot( d2$year , d2$doy , col=col.alpha(rangi2,0.3) , pch=16 ) 
+    lines(d2$year, mu_mean,  col = 'blue', lwd = 3)
+    shade( mu_PI , d2$year , col=col.alpha("black",0.2) )
+    shade(doy_h, d2$year, col = col.alpha('purple', 0.1))
+    mtext(text)
+}
+
+model1 <- cherry_splines_model(knots = 10)
+model2 <- cherry_splines_model(knots = 20)
+model3 <- cherry_splines_model(knots = 30)  # gives warning that model did not converge
+
+par(mfrow = c(3, 1))
+plot_basis_splines(model1$model, model1$knot_list, B = model1$B)
+plot_basis_splines(model2$model, model2$knot_list, B = model2$B)
+plot_basis_splines(model3$model, model3$knot_list, B = model3$B)
+```
+
+```{r}
+plot_posterior_predictions(model1$model, model1$B)
+plot_posterior_predictions(model2$model, model2$B)
+plot_posterior_predictions(model3$model, model3$B)
+```
+
+The mean posterior prediction line becomes much more squiggly, especially in the middle years. With 10 knots the line is much more linear in the starting years and overall much more smooth. Increasing knots decreases the smoothness since now it can adjust to more local patterns.
+
+Next, let us see the effect of changing the width of the weights prior while keeping the knots constant at 15.
+
+```{r}
+
+num_knots <- 15
+knot_list <- quantile( d2$year , probs=seq(0,1,length.out=num_knots) )
+
+B <- bs(d2$year,
+        knots=knot_list[-c(1,num_knots)] , 
+        degree=3 , intercept=TRUE )
+
+dt = list(D = d2$doy, B = B)
+start_list <- list(w = rep(0, ncol(B)))
+
+# change width to different values, such as 5, 20 and 30
+m1 <- quap( 
+    alist( D ~ dnorm( mu , sigma ) ,
+           mu <- a + B %*% w ,
+           a ~ dnorm(100,10),
+           w ~ dnorm(0, 5),
+           sigma ~ dexp(1)
+    ), data = dt , start = start_list )
+
+m2 <- quap( 
+    alist( D ~ dnorm( mu , sigma ) ,
+           mu <- a + B %*% w ,
+           a ~ dnorm(100,10),
+           w ~ dnorm(0, 20),
+           sigma ~ dexp(1)
+    ), data = dt , start = start_list )
+
+m3 <- quap( 
+    alist( D ~ dnorm( mu , sigma ) ,
+           mu <- a + B %*% w ,
+           a ~ dnorm(100,10),
+           w ~ dnorm(0, 100),
+           sigma ~ dexp(1)
+    ), data = dt, start = start_list )
+
+plot_posterior_predictions(m1, B, "Knots = 15, Width = 5")
+plot_posterior_predictions(m2, B, "Knots = 15, Width = 20")
+plot_posterior_predictions(m3, B, "Knots = 15, Width = 30")
+par(mfrow = c(1,1))
+```
+
+Increasing the width seems to be making the line more wiggly, especially around the ends, but the effect is not as pronounced with knots = 15.
+
+# Hard Questions
+
+### 4H1 The weights listed below were recorded in the !Kung census, but heights were not recorded for these individuals. Provide predicted heights and 89% intervals for each of these individuals. That is, fill in the table below, using model-based predictions.
+
+| Individual | weight | expected height | 89% interval |
+|------------|--------|-----------------|--------------|
+| 1          | 46.95  |                 |              |
+| 2          | 43.72  |                 |              |
+| 3          | 64.78  |                 |              |
+| 4          | 32.59  |                 |              |
+| 5          | 54.63  |                 |              |
+
+Assuming these are all above 18 years of age, and using the model m4.3 created within the chapter.
+
+```{r}
+data("Howell1")
+dh <- Howell1
+dh2 <- dh[dh$age > 18, ]
+
+xbar <- mean(dh2$weight)
+
+m4.3 <- quap( 
+    alist(
+        height ~ dnorm( mu , sigma ) , 
+        mu <- a + b*( weight - xbar ) ,
+        a ~ dnorm( 178 , 20 ) ,
+        b ~ dlnorm( 0 , 1 ) ,
+        sigma ~ dunif( 0 , 50 )
+    ) , 
+    data=dh2 
+)
+
+weights <- c(46.95, 43.72, 64.78, 32.59, 54.63)
+mu_pred <- link(m4.3, list(weight = weights))
+
+mu_pred_mean <- apply(mu_pred, 2, mean)
+mu_pred_PI <- apply(mu_pred, 2, PI, 0.89)
+
+data.frame(
+    weight = weights, 
+    expected_height = mu_pred_mean, 
+    `lower bound 89%` = mu_pred_PI[1,],
+    `upper bound 89%` = mu_pred_PI[2,]
+)
+```
+
+### 4H2 Select out all the rows in the Howell1 data with ages below 18 years of age. If you do it right, you should end up with a new data frame with 192 rows in it. 
+
+```{r}
+dh3 <- dh[dh$age < 18, ]
+nrow(dh3)
+```
+
+
+#### (a) Fit a linear regression to these data, using quap. Present and interpret the estimates. For every 10 units of increase in weight, how much taller does the model predict a child gets?
+
+Assuming the following model:
+
+$$
+\begin{align}
+
+h &\sim Normal(\mu, \sigma) \\
+\mu &= \alpha + \beta (weight - \overline {weight}) \\
+\alpha &\sim Normal(135, 40) \\
+\beta &\sim \operatorname{Log-Normal}(0, 1) \\
+\sigma &\sim Uniform(0 , 50)
+
+\end{align}
+$$
+Since there are children ranging from age 0 to 18, assuming prior average height of all kids as 135 cm (using the source given above in a previous question). Converting the same to a model using quap below. 
+
+```{r}
+
+mod <- quap(
+    alist(
+        height ~ dnorm(mu, sigma), 
+        mu <- a + b * weight, 
+        a ~ dnorm(135, 40), 
+        b ~ dlnorm(0, 1), 
+        sigma ~ dunif(0, 50)
+    ), 
+    data = dh3
+)
+
+precis(mod)
+```
+
+Weight has not been centered for the regression here. The interpretation is as follows:
+
+* $\alpha$ - with a mean of 58.39, this is the mean height of a kid with theoretical weight of zero (which is not likely). 
+* $\beta$ - this is the increase in height per unit of increase in weight. Thus for 10 units increase in weight, we would expect the child would get 20.71 cm taller. 
+* $\sigma$ - the standard deviation of heights is 8.44 cm. 
+
+
+#### (b) Plot the raw data, with height on the vertical axis and weight on the horizontal axis. Superimpose the MAP regression line and 89% interval for the mean. Also superimpose the 89% interval for predicted heights.
+
+```{r}
+range(dh3$weight)
+weight.seq <- seq(4, 45, by = 1)
+
+sample_mu <- link(mod, list(weight = weight.seq))
+mu.mean <- apply(sample_mu, 2, mean)
+mu.PI <- apply(sample_mu, 2, PI, 0.89)
+
+sim_heights <- sim(mod, list(weight = weight.seq))
+simh <- apply(sim_heights, 2, PI, 0.89)
+
+plot(height ~ weight, data = dh3, col = col.alpha('black', 0.8), pch = 20)
+lines(weight.seq, mu.mean, lwd = 2, col = 'blue')
+shade(mu.PI, weight.seq, col = col.alpha('black', 0.4))
+shade(simh, weight.seq, col = col.alpha('blue', 0.1))
+```
+
+#### c) What aspects of the model fit concern you? Describe the kinds of assumptions you would change, if any, to improve the model. You don’t have to write any new code. Just explain what the model appears to be doing a bad job of, and what you hypothesize would be a better model.
+
+The model assumes a linear relationship between weight and height, which from the graph above is clearly not the case. The height increases at a much higher rate for younger children compared to older kids, which can be seen in the graph as the height begins to plateau towards the end. A better fit would involve some non-linear relationship, using polynomial terms or splines with 3-4 knots. 
+
+
+### 4H3 Suppose a colleague of yours, who works on allometry, glances at the practice problems just above. Your colleague exclaims, “That’s silly. Everyone knows that it’s only the logarithm of body weight that scales with height!” Let’s take your colleague’s advice and see what happens. 
+
+#### (a)Model the relationship between height (cm) and the natural logarithm of weight (log-kg). Use the entire Howell1 data frame, all 544 rows, adults and non-adults. Can you interpret the resulting estimates? 
+
+```{r}
+mod2 <- quap(
+    alist(
+        height ~ dnorm(mu, sigma), 
+        mu <- a + b * log(weight), 
+        a ~ dnorm(135, 40), 
+        b ~ dlnorm(0, 1), 
+        sigma ~ dunif(0, 50)
+    ), 
+    data = dh
+)
+
+precis(mod2)
+```
+
+Interpretation:
+
+* $\alpha$ - average height when log weight is zero (which would imply weight = 1kg) is -23.59. 
+* $\beta$  - height increases by 47.02 cm when log weight increases by one, or when weight increases 2.72 times (we are using natural log here)
+* $\sigma$ - sd of heights is 5.13 cm. 
+
+
+####(b) Begin with this plot: plot( height ~ weight , data=Howell1 ). Then use samples from the quadratic approximate posterior of the model in (a) to superimpose on the plot: (1) the predicted mean height as a function of weight, (2) the 97% interval for the mean, and (3) the 97% interval for predicted heights.
+
+```{r}
+range(dh$weight)
+weight.seq <- seq(4, 63, by = 1)
+
+sample_mu <- link(mod2, list(weight = weight.seq))
+mu.mean <- apply(sample_mu, 2, mean)
+mu.PI <- apply(sample_mu, 2, PI, 0.89)
+
+sim_heights <- sim(mod2, list(weight = weight.seq))
+simh <- apply(sim_heights, 2, PI, 0.89)
+
+plot(height ~ weight, data = dh3, col = col.alpha('black', 0.8), pch = 20)
+lines(weight.seq, mu.mean, lwd = 2, col = 'blue')
+shade(mu.PI, weight.seq, col = col.alpha('black', 0.4))
+shade(simh, weight.seq, col = col.alpha('blue', 0.1))
+```
+
+A much better fit!
+
+### 4H4 Plot the prior predictive distribution for the parabolic polynomial regression model in the chapter. You can modify the code that plots the linear regression prior predictive distribution. Can you modify the prior distributions of α, β1, and β2 so that the prior predictions stay within the biologically reasonable outcome space? That is to say: Do not try to fit the data by hand. But do try to keep the curves consistent with what you know about height and weight, before seeing these exact data.
+
+Let us first write down the model equation:
+
+$$
+\begin{align}
+
+height &\sim Normal(\mu, \sigma) \\
+\mu &= \alpha + \beta_1 weight_s + \beta_2 weight_s^2 \\
+\alpha &\sim Normal(178, 20) \\
+\beta_1 &\sim \operatorname{Log-Normal(0, 1)} \\
+\beta_2 &\sim Normal(0, 1) \\
+\sigma &\sim Uniform(0, 50)
+
+\end{align}
+
+$$
+
+```{r}
+dh$weight_s <- ( dh$weight - mean(dh$weight) ) / sd(dh$weight) 
+dh$weight_s2 <- dh$weight_s^2 
+
+plot_prior_poly <- function(a, b1, b2, N = 100){
+    plot( NULL , xlim=range(dh$weight_s) , ylim=c(-100,400) , xlab="weight" , ylab="height")
+    abline( h=0 , lty=2 )
+    abline( h=272 , lty=1 , lwd=0.5 )
+    mtext( "b1 ~ dlnorm(0,1); b2 ~ dnorm(0, 1)" )
+    
+    for ( i in 1:N ) 
+        curve( a[i] + b1[i]*x + b2[i]*(x^2) , 
+               from = min(dh$weight_s) , to = max(dh$weight_s) , 
+               add = TRUE , col=col.alpha("black", 0.2) )
+}
+```
+
+What do we know about human heights?
+
+* kids grow fast, as we grow old, we don't grow taller anymore
+* biological limits
+* heights lie in the range of 0 to 272, avg (taking into account kids would be in the range of 120?)
+
+```{r}
+# original priors
+N <- 100
+plot_prior_poly(
+    a = rnorm(N, 178, 20), 
+    b1 = rlnorm(N, 0, 1), 
+    b2 = rnorm(N, 0, 1), 
+    N
+)
+```
+
+These are mostly straight lines, no curvature to account for the change in growth rate. 
+
+
+```{r}
+plot_prior_poly(
+    a = rnorm(N, 150, 20), 
+    b1 = rlnorm(N, 3, 0.3), 
+    b2 = rnorm(N, -10, 2),
+    N
+)
+```
+
+This seems to be a better prior that takes into account the curvature present in the data. 
+
+
+### 4H5 Return to data(cherry_blossoms) and model the association between blossom date (doy) and March temperature (temp). Note that there are many missing values in both variables. You may consider a linear model, a polynomial, or a spline on temperature. How well does temperature trend predict the blossom trend?
+
+```{r}
+data("cherry_blossoms")
+ch <- cherry_blossoms[complete.cases(cherry_blossoms),]
+plot(doy ~ temp, data = ch, pch = 20)
+```
+
+We can have the following models - Linear, polynomial with degree 3 and splines model:
+
+$$
+\begin{align}
+
+D_i &\sim Normal(\mu_i , \sigma) \\
+\mu &= \alpha + \beta \ t_i  \\
+\alpha &= Normal(100, 10) \\
+\beta &= Normal(0, 10) \\
+\sigma &= Uniform(0, 50)
+
+\end{align}
+$$
+```{r}
+mch_lin <- quap(
+    alist(
+        doy ~ dnorm(mu, sigma), 
+        mu <- a + b * temp, 
+        a ~ dnorm(100, 10), 
+        b ~ dnorm(0, 10), 
+        sigma ~ dunif(0, 50)
+    ), 
+    data = ch
+)
+precis(mch_lin)
+```
+
+Let's plot the posterior prediction for this:
+
+```{r}
+t_seq <- seq(min(ch$temp), max(ch$temp), length.out = 100)
+
+mu_lin <- link(mch_lin, data = list(temp = t_seq))
+mu_lin_mean <- apply(mu_lin, 2, mean)
+mu_lin_PI <- apply(mu_lin, 2, PI, 0.97)
+
+dsim <- apply(sim(mch_lin, list(temp = t_seq)), 2, PI, 0.97)
+
+
+plot(doy ~ temp, data = ch, pch = 20, col = col.alpha('black', 0.8))
+lines(t_seq, mu_lin_mean, lwd = 2, col = 'red')
+shade(mu_lin_PI, t_seq)
+shade(dsim, t_seq, col = col.alpha('green', 0.2) )
+```
+
+Seems to be a good enough fit. 
+
+Let's try a polynomial next. 
+
+```{r}
+ch2 <- ch
+ch2$temp_s <- (ch2$temp - mean(ch2$temp)) / sd(ch2$temp)
+ch2$temp_s2 <- ch2$temp_s^2
+ch2$temp_s3 <- ch2$temp_s^3
+
+mch_poly <- quap(
+    alist(
+        doy ~ dnorm(mu, sigma), 
+        mu <- a + b1 * temp_s + b2 * temp_s2 + b3 * temp_s3, 
+        a ~ dnorm(100, 10), 
+        b1 ~ dnorm(0, 10), 
+        b2 ~ dnorm(0, 10), 
+        b3 ~ dnorm(0, 10), 
+        sigma ~ dunif(0, 50)
+    ), 
+    data = ch2
+)
+precis(mch_poly)
+```
+
+Let's see the posterior distribution for this:
+
+```{r}
+t_seq <- seq(-2, 3, length.out = 30)
+
+pred_dat <- list( temp_s = t_seq, temp_s2 = t_seq^2, temp_s3 = t_seq^3)
+
+mu_poly <- link(mch_poly, data = pred_dat)
+mu_poly_mean <- apply(mu_poly, 2, mean)
+mu_poly_PI <- apply(mu_poly, 2, PI, 0.97)
+
+dsim <- apply(sim(mch_poly, pred_dat), 2, PI, 0.97)
+
+
+plot(doy ~ temp_s, data = ch2, pch = 20, col = col.alpha('black', 0.8))
+lines(t_seq, mu_poly_mean, lwd = 2, col = 'red')
+shade(mu_poly_PI, t_seq)
+shade(dsim, t_seq, col = col.alpha('green', 0.2) )
+```
+
+This is mostly a linear fit with just some curvautre at the ends. We can also look at the output of `precis` to confirm that the mean values for b2 and b3 are almost zero. 
+
+
+### 4H6 Simulate the prior predictive distribution for the cherry blossom spline in the chapter. Adjust the prior on the weights and observe what happens. What do you think the prior on the weights is doing?
+
+```{r}
+data("cherry_blossoms")
+d <- cherry_blossoms
+
+d2 <- d[ complete.cases(d$doy) , ] # complete cases on doy 
+
+# create basis splintes with 15 knots
+num_knots <- 15 
+knot_list <- quantile( d2$year , probs=seq(0,1,length.out=num_knots) )
+
+B <- bs(d2$year,
+        knots=knot_list[-c(1,num_knots)] , 
+        degree=3 , intercept=TRUE )
+
+alist( D ~ dnorm( mu , sigma ) ,
+       mu <- a + B %*% w ,
+       a ~ dnorm(100,10),
+       w ~ dnorm(0,10),
+       sigma ~ dexp(1)
+)
+
+plot_prior_spline <- function(a, w, N){
+    plot( NULL , xlim = range(d2$year) , ylim=c(0, 200) , xlab="year" , ylab="doy")
+    abline( h = 0 , lty=2 )             # earliest day in year
+    abline( h = 200 , lty=1 , lwd=0.5 ) # max day in year
+    
+    for ( i in 1:N ) {
+        y <- a[i] + B %*% w[i,]
+        lines(d2$year, y, col = col.alpha('black', 0.2))
+    }
+        
+}
+
+N <- 100
+
+# Original Priors
+plot_prior_spline(
+    a = rnorm(N, 100, 10), 
+    w = matrix(rnorm(N*ncol(B), 0, 10), nrow = N, ncol = ncol(B)), 
+    N
+)
+
+# Other Priors
+plot_prior_spline(
+    a = rnorm(N, 100, 20), 
+    w = matrix(rnorm(N*ncol(B), 0, 10), nrow = N, ncol = ncol(B)), 
+    N
+)
+
+plot_prior_spline(
+    a = rnorm(N, 100, 10), 
+    w = matrix(rnorm(N*ncol(B), 0, 5), nrow = N, ncol = ncol(B)), 
+    N
+)
+plot_prior_spline(
+    a = rnorm(N, 100, 10), 
+    w = matrix(rnorm(N*ncol(B), 0, 20), nrow = N, ncol = ncol(B)), 
+    N
+)
+
+plot_prior_spline(
+    a = rnorm(N, 100, 20), 
+    w = matrix(rnorm(N*ncol(B), 0, 20), nrow = N, ncol = ncol(B)), 
+    N
+)
+
+plot_prior_spline(
+    a = rnorm(N, 100, 20), 
+    w = matrix(rnorm(N*ncol(B), 3, 20), nrow = N, ncol = ncol(B)), 
+    N
+)
+```
+
+The prior on the weights seems to be affect how much the model can localise (how squiggly can the lines get). 
+
+
+### 4H8 (there is no 4H7) The cherry blossom spline in the chapter used an intercept α, but technically it doesn’t require one. The first basis functions could substitute for the intercept. Try refitting the cherry blossom spline without the intercept. What else about the model do you need to change to make this work?
+
+```{r}
+data("cherry_blossoms")
+d <- cherry_blossoms
+
+d2 <- d[ complete.cases(d$doy) , ] # complete cases on doy 
+
+# create basis splintes with 15 knots
+num_knots <- 15 
+knot_list <- quantile( d2$year , probs=seq(0,1,length.out=num_knots) )
+B <- bs(d2$year,
+        knots=knot_list[-c(1,num_knots)] , 
+        degree=3 , intercept=TRUE )
+
+m4.8 <- quap( 
+    alist( D ~ dnorm( mu , sigma ) ,
+           mu <- B %*% w ,
+           # a ~ dnorm(100,10),
+           w ~ dnorm(0,10),
+           sigma ~ dexp(1)
+    ),
+    data = list( D = d2$doy , B = B ) ,
+    start = list( w = rep( 0 , ncol(B) ) ) )
+
+# can check the posterior means for all params
+precis(m4.8, depth = 2)
+```
+
+Earlier, all the 'w' terms were around 0, now they are in the range of 100. The intercept was catching the average first day for blooming of cherry blossoms, now this part is captured by the all the 'w'. 
+
+Let us next look at the posterior distribution. 
+
+```{r}
+# First, just drawing the splines times the weight
+post <- extract.samples( m4.8 )
+w <- apply( post$w , 2 , mean )
+
+# Plot the basis functions * weights calculated using quap
+plot( NULL , xlim=range(d2$year) , ylim=c(0,100) , 
+      xlab="year" , ylab="basis * weight" )
+
+for ( i in 1:ncol(B) ) 
+    lines( d2$year , w[i]*B[,i] , col = col.alpha(i, 0.7), lwd = 4)
+
+points(knot_list, y = rep(100, num_knots), pch = 3)
+
+# Now let us look at the posterior distribution 
+# Posterior interval for mu (97%)
+mu <- link( m4.8 )
+mu_mean <- apply(mu, 2, mean)
+mu_PI <- apply(mu,2,PI,0.97)
+
+doy <- sim(m4.8, list( D = d2$doy , B = B ))
+doy_h <- apply(doy, 2, PI, 0.97)
+
+plot( d2$year , d2$doy , col=col.alpha(rangi2,0.3) , pch=16 ) 
+lines(d2$year, mu_mean,  col = 'darkred')
+shade(doy_h, d2$year, col = col.alpha('red', 0.1))
+shade( mu_PI , d2$year , col=col.alpha("black",0.5) )
+```
+
+The model seems to have worked similarly without the intercept. 

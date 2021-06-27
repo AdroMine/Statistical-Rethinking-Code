@@ -1,0 +1,854 @@
+---
+title: "Statistical Rethinking Chapter 7"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, dpi = 150, message = FALSE, warning = FALSE)
+```
+
+# Brain volume vs body mass
+
+```{r}
+sppnames <- c( "afarensis","africanus","habilis","boisei", "rudolfensis","ergaster","sapiens")
+brainvolcc <- c( 438 , 452 , 612, 521, 752, 871, 1350 ) 
+masskg <- c( 37.0 , 35.5 , 34.5 , 41.5 , 55.5 , 61.0 , 53.5 ) 
+d <- data.frame( species=sppnames , brain=brainvolcc , mass=masskg )
+```
+
+We will now standardise body mass but only rescale the outcome. 
+
+```{r}
+d$mass_std <- (d$mass - mean(d$mass)) / sd(d$mass)
+d$brain_std <- d$brain / max(d$brain)         # largest observed value will be one now
+```
+
+$\sigma$ should be be positive so we use a log-normal distribution for it. Here's a simple linear model:
+
+$$
+\begin{align}
+b_i &\sim Normal(\mu_i, \sigma) \\
+\mu_i &=\alpha + \beta m_i \\
+\alpha &\sim Normal(0.5, 1) \\
+\beta &\sim Normal(0, 10) \\
+\sigma &\sim \operatorname{Log-Normal}(0, 1)
+\end{align}
+$$
+
+Thus average brain volume is a linear funciton of body mass. 
+Priors:
+
+- $\alpha$ - centered on the mean brain volume (rescaled) with credible interval from about -1 to 2. (negative values are impossible)
+- $\beta$ - Very flat and centered on zero allowing both large positive and negative values, allowing for absurd inferences as model gets more complex. 
+
+> exp(log_sigma) is used below to keep results always greater than zero. 
+
+```{r}
+library(rethinking)
+m7.1 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, exp(log_sigma)), 
+        mu <- a + b*mass_std, 
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d
+)
+precis(m7.1)
+```
+
+### OLS and Bayesian anti-essentialism
+
+```{r}
+m7.1_ols <- lm(brain_std  ~ mass_std, data = d)
+post <- extract.samples(m7.1_ols)
+str(post) # no posterior for sigma
+```
+
+$R^2$ - proportion of variance explained by model. 
+Computation:
+
+- Compute posterior predictive distributino for each observation (with `sim`)
+- Subtract each observation from its prediction to get residual 
+- get variance of residuals and actual observations (actual empirical variance not sample variance that R calculates by default)
+
+> In principle, Bayesian approach requires we do this for each sample from the posterior. Traditionally R-squared is only computed at the mean prediction which is what we do here. 
+
+```{r}
+set.seed(12)
+s <- sim(m7.1)                       # predictions
+r <- apply(s, 2, mean) - d$brain_std # residuals
+
+resid_var <- var2(r)
+outcome_var <- var2(d$brain_std)
+
+1 - resid_var / outcome_var
+```
+
+Function to compute R2 again and again
+
+```{r}
+R2_is_bad <- function(quap_fit){
+    s <- sim(quap_fit, refresh = 0)
+    r <- colMeans(s) - d$brain_std
+    1 - var2(r)/var2(d$brain_std)
+}
+```
+
+We will now make some models to compare to `m7.1`. 5 models will be considered each more complex and involving polynomial degrees. 
+
+$$
+\begin{align}
+b_i &\sim Normal(\mu_i, \sigma) \\
+\mu_i &= \alpha + \beta_1 m_i + \beta_2 m_i^2 \\
+\alpha &\sim Normal(0.5, 1) \\
+\beta_j &\sim Normal(0, 10)  \tag*{for j = 1..2} \\
+\sigma &\sim \operatorname{Log-Normal}(0,1)
+\end{align}
+$$
+Same as before, only adds $\beta_2$ parameter.
+
+To define this model we could use earlier approach of using b1 and b2, we can also use a vector b and define its lengtrh using `start` list. 
+
+```{r}
+m7.2 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, exp(log_sigma)), 
+        mu <- a + b[1] * mass_std + b[2]*mass_std^2, 
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d, start = list(b = rep(0, 2))
+)
+```
+
+We also create next four models in similar fashion with 3rd, 4th, 5th and 6th degree polynomials added. 
+
+```{r}
+m7.3 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, exp(log_sigma)), 
+        mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3, 
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d, start = list(b = rep(0, 3))
+)
+m7.4 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, exp(log_sigma)), 
+        mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4, 
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d, start = list(b = rep(0, 4))
+)
+m7.5 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, exp(log_sigma)), 
+        mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4 + b[5] * mass_std^5,
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d, start = list(b = rep(0, 5))
+)
+# for m7.6 we replace sigma with constant 0.001. Model won't work otherwise. Why not? This will become evident when we plot them
+m7.6 <- quap(
+    alist(
+        brain_std ~ dnorm(mu, 0.001), 
+        mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4 + b[5] * mass_std^5 + b[6]*mass_std^6, 
+        a ~ dnorm(0.5, 1), 
+        b ~ dnorm(0, 10), 
+        log_sigma ~ dnorm(0, 1)
+    ), data = d, start = list(b = rep(0, 6))
+)
+```
+
+Now we will plot each model following steps from previous chapters (extract samples from posterior, compute posterior predictive distribution at each of several locations on the horizontal axis, summarise and plot). 
+
+```{r}
+plot_model <- function(quap_fit){
+    post <- extract.samples(quap_fit)
+    mass_seq <- seq(from = min(d$mass_std), to = max(d$mass_std), length.out = 100)
+    l <- link(quap_fit, data = list(mass_std = mass_seq))
+    mu <- colMeans(l)
+    ylim1 <- min(mu, d$brain_std)
+    ylim2 <- max(mu, d$brain_std)
+    ci <- apply(l, 2, PI)
+    r2 <- round(R2_is_bad(quap_fit), 2)
+    model_name <- deparse(substitute(quap_fit))
+    plot(brain_std ~ mass_std, data = d, col = "deepskyblue4", pch = 20, cex = 1.8 , 
+         xlab = "brain volume (cc)", ylab = "body mass (kg)", ylim = c(ylim1, ylim2))
+    lines(mass_seq, mu)
+    shade(ci, mass_seq)
+    mtext(paste0(model_name,": R^2 = ", r2), adj = 0, cex = 0.8)
+}
+
+par(mfrow = c(2, 3))
+models <- list(m7.1, m7.2, m7.3, m7.4, m7.5, m7.6)
+# plot_model(m7.1)
+# plot_model(m7.2)
+# plot_model(m7.3)
+# plot_model(m7.4)
+# plot_model(m7.5)
+# plot_model(m7.6)
+
+# below function unscales the original axis too
+brain_plot(m7.1)
+brain_plot(m7.2)
+brain_plot(m7.3)
+brain_plot(m7.4)
+brain_plot(m7.5)
+brain_plot(m7.6)
+```
+
+$R^2$ improves with the degree of the polynomial increasing in model. Sixth degree polynomial passes through each point and has no residual. This is why we had to set the sigma to 0.001, if it were estimated it would shrink to zero. (why sixth degree passes through each point? Because the equation in that model has 7 parameters, the same as the number of data points). 
+
+### Underfitting
+
+Models that are inaccurate both within and out of sample. Learn too little and fail to recover regular features of the sample. 
+
+Another way to conceptualise is to notice that it is insensitive to the sample. Removing any one point from the sample will and we will still get the same regression line. 
+
+Below we remove one point at a time and remodel m7.1 and m7.6. 
+
+```{r}
+par(mfrow = c(1, 2))
+brain_loo_plot(m7.1)
+brain_loo_plot(m7.6)
+```
+
+# Entropy and accuracy
+
+To deal with overfitting and underfitting we first need to set a criterion of model performance, the target. Information Theory is helpful here and provides a natural measurement scale for the distance between two probability distributions. Secondly, __deviance__ is an approximation of relative distance from perfect accuracy. 
+
+
+
+## Firing the weather person
+
+- cost-benefit anlaysis (cost of being wrong)
+- accuracy in context - even ignoring cost-benefit, need a way to judge 'accuracy' that accounts for how much a model could possibly improve prediction.
+
+Predictions of Current Weatherman-
+
+|day        |1  |2  |3  |4   |5   |6   |7   |8   |9   |10  |
+|:----------|:--|:--|:--|:---|:---|:---|:---|:---|:---|:---|
+|prediction |1  |1  |1  |0.6 |0.6 |0.6 |0.6 |0.6 |0.6 |0.6 |
+|observed   |R  |R  |R  |S   |S   |S   |S   |S   |S   |S   |
+
+New weatherman predicts sunny everyday. 
+
+Hit Rate - average chance of correct prediction. 
+
+Above hit rate for old guy is:
+
+$$
+\operatorname{Hit Rate} = 3 \times 1 + 7 \times 0.4 = 5.8 = \textrm{ 5.8 hits in 10 days} = 0.58 \textrm{ correct predictions per day}
+$$
+
+Hit Rate = 3 X 1 + 7 X 0.4 = 5.8 hits in 10 days = 0.58 hits per day
+For the new guy, 
+Hit Rate = 3 X 0 + 7 X 1 = 7 hits in 10 days     = 0.70 hits per day (new guy wins?!)
+
+### Costs and Benefits 
+
+- Suppose getting caught in rain is -5 points of happiness
+- carrying umbrella is -1 happiness
+- chance of carrying umbrella equal to probabilty of rain
+- maximise happiness
+
+Current weatherperson - 3 X (-1) + 7 X (-0.6) = -7.2 happiness
+
+New guy - 3 X (-5) + 7 X 0 = -15 happiness
+
+### Measuring accuracy
+
+which measure of 'accuracy' to adopt? nothing special about hit rate. 
+
+> Question to focus on - Which definition of 'accuracy' is maximised by knowing the true model generating the data
+
+Joint probability - probability of predicting the exact sequence of days, i.e. computing prob of correct predction for each day and then multiplying all together to get the joint prob of correctly predicting the obs sequence. 
+
+Prob Current weatherperson -> $1^3 \times 0.4^7 \approx 0.005$
+
+New guy -> $0^3 \times 1^7 = 0$
+
+- Joint prob what we want. It appears as likelihood in Bayes' theorem. 
+- It is the unique measure that correctly counts up the relatieve number of ways each event could happen (sequence of rain and shine)
+
+- Consider what happens when we maximise avg prob vs joint prob. True data-generating model will not have the highest hit rate. Assigning zero prob in weather case improves hit rate but is clearly wrong. In contrast, truemodel will have the highest joing prob. 
+
+In statistics literature, this measure of accuracy is sometimes called the **Log Scoring Rule** (since typically we take log of joint prob and report that)
+
+
+### Information and uncertainty
+
+After deciding on log prob of data to score accuracy of competing models, we need to define a measure of distance from perfect prediction. 
+
+This measure of distance should understand that some targets are just easier to hit than other targets. for instance if we add another target, like sunny, raining or snow, then since there are three targets and now there are three ways to be wrong instead of just two, making hitting the target harder. This should be reflected in the measure of distance. 
+
+Information Theory provides solution!
+
+> Basic Insight - **__How much is our uncertainty reduced by learning an outcome?__**
+
+This requires a precis definitnion of uncertainty. 
+
+> **Information** - __The reduction in uncertainty when we learn an outcome__
+
+In weather example, let's say there are two possible weather events on any particular day - sunny or rainy. Each of these occur with some prob and these add up to 1. We want a function that uses the probs of shine and rain to produce a measure of uncertainty. 
+
+Necessities of any measure of uncertainty - 
+
+- It should be continuous. Otherwise an arbitrary small change in any of the probs (eg P(rain)) would result in massive change in uncertainty. 
+- Should increase with number of possible events. (e.g. with two cities, one city has only sunny vs rainy while other has sunny/rain/hail, the second should have larger uncertainty)
+- Should be additive - e.g. if we measure uncertainty about rain/shine and then uncertainty about 2 different evens hot/cold, the uncertainty over the four combinations of these events should be the sum of the separate uncertainties. 
+
+Only one function that satisfies these desiderata - **INFORMATION ENTROPY**. 
+
+If there are __n__ different possible events and each event __i__ has probability $p_i$ and we call the list of probabilites __p__, then the unique measure of uncertainty we seek is:
+
+$$
+H(p) = -E log(p_i) = -\sum_{i=1}^{n}p_i log(p_i) 
+$$
+
+> Uncertainty contained in a prob dist is the avg log-prob of an event. 
+
+To compute information entropy for weather example, suppose P(rain) = 0.3, and P(shine) = 0.7, then 
+$$
+H(p) = -(p_1log(p_1) + p_2 log(p_2)) \approx 0.61
+$$
+
+```{r}
+p <- c(0.3, 0.7)
+-sum(p * log(p))
+```
+
+If we were talking about a desert, then P(rain) might be = 0.01 and P(shine) = 0.99, then H(p) = 0.06. It has decreased since there's less uncertainty about any given day, compared to a place in which it rains 30% of the time. 
+
+If we add event, say P(sunny) = 0.7, P(rain) = 0.15, P(snow) = 0.15, then H(p) = 0.82
+```{r}
+p <- c(0.7, 0.15, 0.15)
+-sum(p * log(p))
+```
+
+It has increased with the increase in uncertainty. 
+
+### From entropy to accuracy
+
+H provides way to quantify uncertainty. It tells how hard it is to hit the target. We need measure to use H to say how far a model is from the target. 
+
+> **Divergence**: the additional uncertainty induced by using probabilities from one distribution to describe another distribution. 
+
+This is often called the **Kullback-Leibler divergence** or simply **KL divergence**. 
+
+$$
+D_{KL}(p,q) = \sum_i p_i (\log(p_i) - \log(q_i) ) = \sum_i p_i \log \left( \frac{p_i}{q_i} \right) 
+$$
+> Plain Language: divergence is the average difference in log probability between target (p) and model (q). 
+
+Divergence is just the difference between two entropies: Entropy of the target distribution __p__ and the cross entropy arising from using __q__ to predict __p__. 
+
+When $p = q$, then $D_{KL}(p,q) = D_{KL}(p,p)= \sum_i p_i (\log(p_i) - \log(p_i))=0$
+
+As q grows more different from p, the divergence $D_{KL}$ also grows. 
+
+
+Suppose true distribution of events is $p = \{0.3, 0.7\}$. Suppose __q__ can be anything from $q = \{0.01, 0.99\}$ to $q = \{0.99, 0.01\}$ Below we simulate different values of q and compute and plot the $D_{KL}$. 
+
+```{r}
+p <- c(0.3, 0.7)
+q1 <- seq(0.01, 0.99, by = 0.01)
+q2 <- 1 - q1
+
+dkl <- apply(cbind(q1, q2), 1, function(q) sum(p * log(p / q))) 
+
+par(mfrow = c(1,1))
+
+plot(q1, dkl, type = 'l', xlab = "q[1]", ylab = "Divergence fo q from p", lwd = 2, col = 'blue')
+abline(v = 0.3, lty = 2, lwd = 1, col = 'black', )
+abline(h = 0, lty = 2, lwd = 1, col = 'black')
+text(x = 0.3, y = 1.5, "q = p", adj = -0.1)
+```
+
+Since predictive models specify probabilites of events (observations), models with lower divergence are better. 
+
+## Estimating Divergence
+
+We typically don't konw true __p__. So how do we even compute $D_{KL}$? There's a way out. If we have two competing models we only want to find out which one is closer to target. Let's say two models __q__ and __r__. computing divergence for both has log(p) in it which subtracts out if we compute distance of q from r. 
+
+So we only need a model's average log-prob : $E \log(q_i)$
+
+Thus 
+
+$$
+S(q) = \sum_i \log (q_i)
+$$
+
+For Bayesian model, we have to use entire posterior distribution (otherwise we are throwing away info). 
+
+So for each observation, we find the log of the avg prob over entire posterior dist. **Log Pointwise Predictive Density**. 
+
+```{r}
+set.seed(1)
+lppd(m7.1, n = 1e4)
+```
+
+We get 7 values, each a log-prob score for a specific obs. Summing these can provide the total log-prob score for model and data. 
+
+- Larger values are better (indicates larger average accuracy)
+- **Deviance** is like a lppd score, but multiplied by -2, so that smaller values are better. 
+
+
+#### Computing LPPD
+
+Bayesian version of log prob score is called **Log Pointwise Predictive Density**. 
+
+For data $y$ and posteriorr distribition $\Theta$:
+
+$$
+lppd(y, \Theta) = \sum_i \log \frac{1}{S} \sum_s p(y_i | \Theta_S)
+$$
+
+where $S$ is the no of samples, and $\Theta_s$ is the s-th set of sampled parameter values in the posterior distribution. 
+
+Can run into computer underflow problems, so some tricks are needed to maintain precision. 
+
+```{r}
+set.seed(1)
+logprob <- sim(m7.1, ll = TRUE, n = 1e4)
+n <- ncol(logprob)
+ns <- nrow(logprob)
+f <- function(i) log_sum_exp( logprob[,i] ) - log(ns)
+(lppd <- sapply( 1:n, f))
+```
+
+`ll=TRUE` in sim returns log-probs. `log_sum_exp` exponentiates them to get probs, sums them and then takes log. the (1/S) part is then logged and subtracted. 
+
+### Scoring the right data
+
+Just like $R^2$, log-prob score also gets better with more complex models. Log-prob on training data is a measure of retropredictive accuracy, not predictive accuracy. 
+
+```{r}
+set.seed(1)
+sapply(models, function(m) sum(lppd(m)))
+```
+
+So we need to go the route of train-test data. 
+
+- Training data of size N
+- Compute posterior dist of a model for training smaple. Compute score on training sample. $D_{train}$
+- Suppose another sample of size N from the same process is obtained. This is the test sample. 
+- Compute score on test sample using posterior trained on training sample. We get $D_{test}$
+
+#### Simulation Example of Train vs Test Deviance
+
+```{r eval=FALSE}
+# N <- 20 
+# kseq <- 1:5 
+# dev <- sapply( kseq , function(k) { 
+#     print(k); 
+#     r <- replicate( 5 , sim_train_test( N=N, k=k, cv.cores = 4 ) );
+#     c( mean(r[1,]) , mean(r[2,]) , sd(r[1,]) , sd(r[2,]) )
+# } )
+# 
+# plot( 1:5 , dev[1,] , 
+#       ylim = c( min(dev[1:2,])-5 , max(dev[1:2,])+10 ) , 
+#       xlim=c(1,5.1) , 
+#       xlab="number of parameters" , 
+#       ylab="deviance" , 
+#       pch=16 , col=rangi2 )
+# 
+# mtext( concat( "N = ",N ) ) 
+# points( (1:5)+0.1 , dev[2,] ) 
+# for ( i in kseq ) { 
+#     pts_in <- dev[1,i] + c(-1,+1)*dev[3,i] 
+#     pts_out <- dev[2,i] + c(-1,+1)*dev[4,i] 
+#     lines( c(i,i) , pts_in , col=rangi2 ) 
+#     lines( c(i,i)+0.1 , pts_out )
+# }
+```
+
+
+# Regularisation
+
+ Using narrower priors helps regulate. 
+ 
+ <not doing the simulation, since it takes too much time>
+ 
+ 
+#  Predicting predictive accuracy
+ 
+Cross-Validation - LOOCV with **Pareto smoothed Importance sampling cross-validation** (PSIS)
+
+Information Criteria - 
+
+> AIC 
+
+$$
+AIC = D_{Train} + 2p = -2lppd + 2p \tag{p = no of paramters}
+$$
+AIC is an approximation and reliable only when:
+- Priors are flat or overwhelmed by likelihood
+- Posterior distribution is approximately multivariate Gaussian 
+- Sample size N is >> than no of parameters k
+
+Flat priors are never really good, and with multilevel models priors are almost never flat by def, so AIC not very good. 
+
+
+
+**Widely Applicable Information Criteria** (WAIC) - makes no assumptions about the shape of the posterior. 
+It provides an approximation of the out of sample deviance (that converges to CV approximation in a large sample). It tries to approximate the out of sample KL divergence score. 
+
+$$
+WAIC(y, \Theta) = -2(lppd - \underbrace {\sum_i var_{\theta} \log p(y_i | \theta)}_\text{penalty term})
+$$
+$\Theta$ is the posterior distribution. 
+The penalty term means, "compute the variance in log-probabilities for each observation i, and then sum up these variances to get the total penalty." 
+#### WAIC Calculations
+
+```{r}
+data(cars)
+m <- quap(
+    alist(
+        dist ~ dnorm(mu, sigma), 
+        mu <- a + b * speed, 
+        a ~ dnorm(0, 100), 
+        b ~ dnorm(0, 10), 
+        sigma ~ dexp(1)
+    ), data = cars
+)
+
+set.seed(94)
+post <- extract.samples(m, n = 1000)
+```
+
+
+We’ll need the log-likelihood of each observation i (total 50 observations) at each sample s from the posterior:
+
+```{r}
+n_samples <- 1000
+logprob <- sapply(1:n_samples, 
+                  function(s){
+                      mu <- post$a[s] + post$b[s] * cars$speed
+                      dnorm(cars$dist, mu, post$sigma[s], log = TRUE)
+                  })
+
+str(logprob)
+```
+
+50 X 1000 structure. 
+observations in rows, samples in columns. 
+
+To compute lppd (bayesian deviance), we need to average samples in each row, take log and add them all together. 
+
+To do this with precision, we need to do the averaging part on the log scale. So we will use log_sum_exp function. 
+
+```{r}
+n_cases <- nrow(cars)
+lppd <- sapply(1:n_cases, function(i) log_sum_exp(logprob[i,]) - log(n_samples))
+```
+
+`sum(lppd)` will give the lppd for the model. We also need the penalty term $p_{WAIC}$. We just need to compute the variance across the samples for each observation, then add these together. 
+
+```{r}
+pWAIC <- apply(logprob, 1, var)
+```
+
+Now WAIC is equal to :
+
+```{r}
+-2 * (sum(lppd) - sum(pWAIC))
+```
+
+```{r}
+WAIC(m)
+```
+
+the difference is due to the variation due to simulation. 
+
+WAIC standard error is equal to the square root of number of cases multiplied by the variance over the individual obs terms in WAIC. 
+
+```{r}
+waic_vec <- -2*(lppd - pWAIC)
+sqrt(n_cases * var(waic_vec))
+```
+
+
+# Model Comparison
+
+## Model mis-selection
+
+Good PSIS or WAIC only indication of predictive accuracy not causality. 
+
+
+Re-running fungus example from previous chapter. 
+
+```{r}
+suppressPackageStartupMessages(library(rethinking))
+set.seed(71)
+# number of plants
+N <- 100
+
+# simulate initial heights
+h0 <- rnorm(N, 10, 2)
+# assign treatments and simulate fungus and growth
+treatment <- rep(0:1, each = N / 2)
+fungus <- rbinom(N, size = 1, prob = 0.5 - treatment * 0.4)
+h1 <- h0 + rnorm(N, 5 - 3 * fungus)
+
+# compose a clean data frame
+d <- data.frame(h0 = h0, h1 = h1, treatment = treatment, fungus = fungus)
+
+m6.6 <- quap(
+    alist(
+        h1    ~ dnorm(mu, sigma), 
+        mu    <- h0 * p, 
+        p     ~ dlnorm(0, 0.25), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+m6.7 <- quap(
+    alist(
+        h1    ~ dnorm(mu, sigma), 
+        mu    <- h0 * p, 
+        p     <- a + bt * treatment + bf * fungus, 
+        a     ~ dlnorm(0, 0.25), 
+        bt    ~ dnorm(0, 0.5), 
+        bf    ~ dnorm(0, 0.5), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+m6.8 <- quap(
+    alist(
+        h1    ~ dnorm(mu, sigma), 
+        mu    <- h0 * p, 
+        p     <- a + bt * treatment, 
+        a     ~ dlnorm(0, 0.25), 
+        bt    ~ dnorm(0, 0.5), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+
+```
+
+m6.6 is the model with just an intercept. 
+
+m6.7 is the model with both treatment and fungus (post-treatment var)
+
+m6.8 is the model with treatment but not fungus. 
+
+```{r}
+set.seed(11)
+WAIC(m6.7)
+```
+
+WAIC is the guess for the out-of-sample deviance. 
+
+`rethinking` provides convenience function `compare` to ... compare models!
+
+```{r}
+set.seed(77)
+compare(m6.6, m6.7, m6.8, func = WAIC)
+```
+
+Cols are - WAIC, std error of WAIC, differnce of each WAIC from the best model, standard error of this difference, prediction penalty (pWAIC), and the Akaike weight. 
+
+- WAIC - smaller values are better. Models automatically sorted from best to worst. Model with fungus variable has smallest WAIC. 
+
+- pWAIC - close to (but slightly below) the number of dimensions in the posterior of each model (to be expected in lin reg  with reg priors)
+
+- dWAIC - difference in WAIC from best model. e.g. m6.7 is 40 units deviance away from m6.8. and intercept is 3 units deviance smaller m6.8. We can't say directly whether these are big or small differences. Better question, are the models easily distinguished by their expected out of sample accuracy? We need to consider error in the WAIC estimates to answer this. We don't have a target sample, so these are just guesses. 
+
+- SE - approx std error of each WAIC. approximately we expect uncertainty in out of sample accuracy to be normally distributed with mean equal to the reported WAIC value and a std deviation equal to the std error. (this approximation tends to drastically underestimate uncertainty on smaller samples). 
+
+**__Judging whether two models are easy to distinguish.__**
+
+We use std error of their difference not SE of WAIC. To compute the std error fo the differnece between models m6.7 and m6.8, we need the pointwise breakdown of the waic values:
+
+```{r}
+set.seed(91)
+waic_m6.7 <- WAIC(m6.7, pointwise = TRUE)$WAIC
+waic_m6.8 <- WAIC(m6.8, pointwise = TRUE)$WAIC
+n <- length(waic_m6.7)
+diff_m6.7_m6.8 <- waic_m6.7 - waic_m6.8
+
+sqrt(n * var(diff_m6.7_m6.8))
+```
+
+This is the value in the dSE column. (difference due to simulation variance). 
+
+Difference between models is 40.9 and std error is 10.5. The 99% interval of difference will be (z-score of 2.6):
+```{r}
+40.0 + c(-1,1) * 10.5 * 2.6
+```
+
+doesn't contain zero, so models are verry easy to distinguish by expected out of sample accuracy. m6.7 is a lot better. A plot helps visualise this easily. 
+
+```{r}
+plot(compare(m6.6, m6.7, m6.8))
+```
+
+- Filled points are the in-sample deviance values. 
+- open points are the WAIC values. (each model does better in-sample)
+- line segments show the std error of each WAIC (values from col SE)
+- lighter line segment shows std error of difference
+
+So WAIC not good for making causal inferences (which it is not supposed to do anyway). 
+
+> difference between m6.8 and m6.6 (with treatment vs only intercept model)
+
+m6.8 provides good evidence that treatment works
+```{r}
+precis(m6.8)
+```
+
+but difference in deviance is only 3 units of deviance. 
+
+```{r}
+set.seed(92)
+waic_m6.6 <- WAIC( m6.6 , pointwise=TRUE )$WAIC 
+diff_m6.6_m6.8 <- waic_m6.6 - waic_m6.8 
+sqrt( n*var( diff_m6.6_m6.8 ) )
+```
+
+`compare` table doesn't show this value by default but it did calculate it and we can access using dSE slot. 
+
+```{r}
+set.seed(93)
+compare(m6.6, m6.7, m6.8)@dSE
+```
+
+we get matrix with pariwise dSE for the models compared. 
+
+dSE for m6.6 vs m6.8 is larger than the difference itself. So we can't distinguish these models on the basis of WAIC. 
+This is since even though treatment does work, the impact on final plant height is minor. So it alone does't do much to improve prediction of plant height. 
+
+- weight column - these are a traditional way to summarise relative support for each model. They always sum to 1, within a set of compared models. The weight of a model i is computed as:
+
+$$
+w_i = \frac{\exp(-0.5\Delta_i)}{\sum_j \exp(-0.5\Delta_j)}
+$$
+
+$\Delta_i$ is the difference between model i's WAIC value and the best WAIC in the set. (dWAIC) These can be a quick way to see how big the differences are among models. But we still need to inspect the std errors since weights don't reflect them. 
+
+Weights are also used in **Model Averaging** (combining the predictions of multiple models). 
+
+
+## Outliers and other illusions
+
+In the Divorce example, some states (observations in that dataset) were outliers (like Idaho). Let's see how PSIS and WAIC represen that importantce.
+redoing divorce example. 
+
+```{r}
+library(rethinking) 
+data(WaffleDivorce) 
+d <- WaffleDivorce 
+d$A <- standardize( d$MedianAgeMarriage ) 
+d$D <- standardize( d$Divorce ) 
+d$M <- standardize( d$Marriage )
+m5.1 <- quap( 
+    alist( 
+        D ~ dnorm( mu , sigma ) , 
+        mu <- a + bA * A , 
+        a ~ dnorm( 0 , 0.2 ) , 
+        bA ~ dnorm( 0 , 0.5 ) , 
+        sigma ~ dexp( 1 )
+    ) , data = d )
+m5.2 <- quap( 
+    alist( 
+        D ~ dnorm( mu , sigma ) , 
+        mu <- a + bM * M , 
+        a ~ dnorm( 0 , 0.2 ) ,
+        bM ~ dnorm( 0 , 0.5 ) , 
+        sigma ~ dexp( 1 )
+    ) , data = d )
+m5.3 <- quap( 
+    alist( 
+        D ~ dnorm( mu , sigma ) , 
+        mu <- a + bM*M + bA*A ,
+        a ~ dnorm( 0 , 0.2 ) ,
+        bM ~ dnorm( 0 , 0.5 ) ,
+        bA ~ dnorm( 0 , 0.5 ) ,
+        sigma ~ dexp( 1 )
+    ) , data = d )
+```
+
+M has no influence on D after controlling for A. 
+
+```{r}
+set.seed(24071847)
+compare(m5.1, m5.2, m5.3, func = PSIS)
+```
+
+Model without M is on top. since M has little relation with D. So model w/o it has slightly better expected out-of-sample performance even though it actually fits teh sample slightly worse than m5.3, the model wiht both predictors. 
+
+We also get message that `some Pareto k values are very high.` This implies that the smoothing approximation that PSIS uses is unreliable for some points. (when a point's Pareto k value > 0.5, importance weight can be unreliable). These points tend to be outliers with unlikely values according to the model. As a result they are highly influential and make it difficult to estimate out of sample predictive accuracy. Because any new sample is unlikely to contain these same outliers, and since these were highly influential, they could make out-of-sample predictions worse than expected. 
+
+
+Looking at pointwise PSIS
+
+```{r}
+set.seed(24071847)
+PSIS_m5.3 <- PSIS(m5.3, pointwise = TRUE)
+set.seed(24071847)
+WAIC_m5.3 <- WAIC(m5.3, pointwise = TRUE)
+
+plot(PSIS_m5.3$k, WAIC_m5.3$penalty, xlab = "PSIS Pareto k", ylab = "WAIC penalty", col = rangi2, lwd = 2)
+#identify(PSIS_m5.3$k, WAIC_m5.3$penalty, label = d$Loc)
+```
+
+State of Idaho has Pareto k and high WAIC penalty. 
+
+WAIC penalty is sometimes called the "effective number of parameters" since in ordinary linear regression, sum of all penalty terms from all points tends to be equal to the number of free parameters in the model. However, in this case there are 4 parameters in the model while the penalty is closer to 6. Outlier Idaho is causing this additional overfitting risk. 
+
+```{r}
+WAIC(m5.3)
+```
+
+#### What to do with Outliers? 
+
+Existing tradition of dropping them. even before fitting model based on std dev from the mean outcome value. Not good, please don't do this. 
+
+If there are only a few outliers and we are reporting results with and without them, then okay to drop them. 
+
+If there are several outliers? Gaussian distributions have thin tails while many natural phenomenon have thicker tails. 
+
+Use **Robust Regression** - a linear model in which the influene of extreme observations is reduced. Common and useful kind of robust regression is to use **Student's T** distribution instead of gaussian model. It has parameters mean $\mu$ and scale $\sigma$ like Gaussian and also extra shape parameter $\nu$ that controls how thick the tails are. When this shape parameter is large tails are thin, coverging to Gaussian as limit shape approaches infinity. As $\nu$ approaches 1, tails get thicker. 
+
+With a large data set we could estimate $\nu$. Usually we don't since there aren't enough extreme observations to do so, and instead assume it is small (thick tails) in order to reduce influence of outliers. 
+
+
+Example - severity of wars since 1950. If we use this to estimate a trend, then WW1 and WW2 are outliers. A reasonable estimate depends upon either a longer time series or judicitous use of a thick tailed distribution. 
+
+Let's reestimate divorce model using a Student-t distribution with shape parameter $\nu=2$. 
+
+```{r}
+m5.3t <- quap(
+    alist(
+        D ~ dstudent(2, mu, sigma), 
+        mu <- a + bM * M + bA*A, 
+        a ~ dnorm(0, 0.2), 
+        c(bM, bA) ~ dnorm(0, 0.5), 
+        sigma ~ dexp(1)
+    ), data = d
+)
+PSIS(m5.3t) # no message that some Pareto k values are very high this time
+```
+
+```{r}
+plot(coeftab(m5.3, m5.3t))
+```
+
+Mostly similar, bA slightly more negative now. This is since Idaho had a low D and A. When it was influential, it reduced the association between age at marriage and divorce. Not it is less influential, so the estimation is estimated to be larger. 
+
+Robust regression will not always increase an association. 
+
+
+
+

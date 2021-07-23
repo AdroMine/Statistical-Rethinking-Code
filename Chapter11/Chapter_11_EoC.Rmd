@@ -1,0 +1,1180 @@
+---
+title: "Statistical Rethinking Chapter 11 End of Chapter Questions"
+output:
+  # prettydoc::html_pretty:
+  #   theme: architect
+  #   highlight: github
+  rmdformats::readthedown:
+    gallery: true
+    self_contained: true
+    lightbox: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error = FALSE)
+library(rstan)
+rstan_options(auto_write = TRUE)
+Sys.setlocale(locale = "Chinese")
+```
+
+# Easy Questions
+
+## 11E1
+> If an event has probability 0.35, what are the log odds of this event. 
+
+Odds = p / (1-p)
+```{r}
+p <- 0.35
+log(p / (1-p))
+```
+
+## 11E2 
+> If an event has log-odds 3.2, what is the probability of this event?
+
+Prob = Odds / (1 + Odds)
+```{r}
+lo <- 3.2
+exp(lo) / (1 + exp(lo))
+```
+
+## 11E3 
+> Suppose that a coefficient in a logistic regression has value 1.7. What does this imply about the proportional change in odds of the outcome?
+
+The proportional odds increase by 1.7 for every unit increase in the predictor. 
+
+## 11E4
+> Why do Poisson regressions sometimes require the use of an offset? Provide an example.
+
+If we are comparing/using data whose rate is specified using different units of time/space, then using an offset becomes necessary. For instead let's say we are studying the number of people that visit a bank branch. If one branch computes the daily rate while the other a weekly one, then comparing the branches would require using an offset so that the comparison can be made. 
+
+# Medium Questions
+
+## 11M1
+> As explained in the chapter, binomial data can be organized in aggregated and disaggregated forms, without any impact on inference. But the likelihood of the data does change when the data are converted between the two formats. Can you explain why?
+
+In the aggregated form, the probability of observing k successes out of n trials, with probabilty of success as p is:
+
+$$
+Pr(k|n, p) = {n \choose k} p^k (1-p)^{n-k}
+$$
+
+For the non-aggregated case, the probability of k successes is:
+
+$$
+Pr(1, ..., 1 | p) = p^k (1-p)^{n-k}
+$$
+In the aggregated form, we have the additional multiplicity term in the beginning describing the number of combinations/ways of getting k successes out of n trials. In the non-aggregated form, we get the data describes the way it happened, so we don't have the multiplicity term anymore. 
+
+## 11M2
+> If a coefficient in a Poisson regression has value 1.7, what does this imply about the change in the outcome?
+
+Let it be a regression with a single predictor and intercept. We have:
+
+$$
+\log (\lambda) = \alpha + \beta X 
+$$
+
+where $\beta=1.7$. For one unit increase in X, we have:
+
+$$
+\begin{align}
+\log(\lambda_2) - \log(\lambda_1) &= \alpha + \beta (X+1) - \alpha - \beta(X) \\
+\log (\frac{\lambda_2}{\lambda_1}) &= \beta \\
+\text{Taking exponent of each side}: \\
+\frac{\lambda_2}{\lambda_1} = \exp (\beta) \\ 
+\implies \lambda_2 = \exp(\beta) \lambda_1
+\end{align}
+$$
+
+Thus for every unit increase in predictor, outcome increases by exp(1.7) = 5.47
+
+## 11M3
+> Explain why the logit link is appropriate for a binomial generalized linear model.
+
+In a binomial model, the parameter of interest we are trying to map is the probability of success. A probability needs to lie between 0 and 1 so we need a link that maps the linear space to [0-1]. Logit link achieves this. 
+
+$$
+logit(p_i) = \log \frac{p_i}{1-p_i} = \alpha + \beta x_i \\
+p_i = \frac{1}{1 + \exp (-( \alpha + \beta x_i) ) }
+$$
+
+Plotting the above:
+
+```{r}
+curve(1/(1+exp(-x)), from = -10, to = 10, n = 1e3)
+abline(h = c(0,1), lty = 2)
+mtext("Logit Link confines the output space to 0-1")
+```
+
+## 11M4
+> Explain why the log link is appropriate for a Poisson generalized linear model.
+
+For a Poisson model, we want to map the linear space to a positive only space. The log link allows this. We build a linear model for the log of $\lambda$, so that after exponentiating we get positive only values. 
+
+## 11M5 
+> What would it imply to use a logit link for the mean of a Poisson generalized linear model? Can you think of a real research problem for which this would make sense?
+
+Using a logit link would constrict $\lambda$ to be within [0-1]. Since Poisson is for count events, this would imply that in the problem the event either happens (1 count) or does not happen (0). The event cannot happen more than once. 
+
+Poisson is a special case of binomial, so we could just use binomial anyway in such a situation. Using Poisson would make sense possibly if we believe that the influence of a predictor diminishes. 
+
+## 11M6
+> State the constraints for which the binomial and Poisson distributions have maximum entropy. Are the constraints different at all for binomial and Poisson? Why or why not?
+
+Binomial Distribution has the max entropy when each trial must result in one of two events and the expected value is constant. Poisson is just a special case of the Binomial when the probability of success is very low and there is no upper bound, so it has the same constraints.  
+
+## 11M7
+> Use quap to construct a quadratic approximate posterior distribution for the chimpanzee model that includes a unique intercept for each actor, m11.4 (page 330). Compare the quadratic approximation to the posterior distribution produced instead from MCMC. Can you explain both the differences and the similarities between the approximate and the MCMC distributions? Relax the prior on the actor intercepts to Normal(0,10). Re-estimate the posterior using both ulam and quap. Do the differences increase or decrease? Why?
+
+Let's load the dataset and do the pre-processing:
+```{r}
+library(rethinking)
+data(chimpanzees)
+d <- chimpanzees
+d$treatment <- 1 + d$prosoc_left + 2 * d$condition
+
+dat_list <- list(
+    pulled_left = d$pulled_left, 
+    actor = d$actor, 
+    treatment = as.integer(d$treatment)
+)
+```
+
+Repeating the model `m11.4` using both quadratic approximation and MCMC. 
+
+```{r}
+model_formula <- alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + b[treatment], 
+        a[actor] ~ dnorm(0, 1.5), 
+        b[treatment] ~ dnorm(0, 0.5)
+)
+quap_model <- quap(model_formula, data = dat_list)
+mcmc_model <- ulam(model_formula, data = dat_list, chains = 4, log_lik = TRUE, refresh = 0)
+```
+
+Comparing the model:
+```{r fig.height=8}
+plot(coeftab(quap_model, mcmc_model), pch = 16)
+```
+
+We get similar posterior results out of both methods. Only for the second actor's intercept do we get some slight difference,where the quadratic approximation underestimates slightly. Let us look at the density plot for these variable for both the models:
+
+```{r results='hold', fig.width=7, fig.height=7}
+postq <- extract.samples(quap_model)
+postm <- extract.samples(mcmc_model)
+
+withr::with_par(
+    list(mfrow = c(3, 3)), 
+    code = {
+        for(i in 1:7){
+            dens(postq$a[,i], col = 'black', main = paste0('a[',i,']'))
+            dens(postm$a[,i], col = 'blue', add = TRUE)
+            legend("topright", legend = c('quap', 'mcmc'), col = c("black","blue"), lty = 1)
+        }
+    }
+)
+withr::with_par(
+    list(mfrow = c(2, 2)), 
+    code = {
+        for(i in 1:4){
+            dens(postq$b[,i], col = 'black', main = paste0('b[',i,']'))
+            dens(postm$b[,i], col = 'blue', add = TRUE)
+            legend("topright", legend = c('quap', 'mcmc'), col = c("black","blue"), lty = 1)
+        }
+    }
+)
+```
+
+The posterior distribution seems to be the same in all variables except for the intercept of second actor. Zooming in:
+
+```{r}
+dens(postq$a[,2], col = 'black', main = paste0('a[',2,']'))
+dens(postm$a[,2], col = 'blue', add = TRUE)
+legend("topright", legend = c('quap', 'mcmc'), col = c("black","blue"), lty = 1)
+```
+
+The MCMC posterior seems to have a much longer tail on the right. Whereas the uqadratic approximation assumes Gaussian distribution and thus calculates a symmetric distribution. 
+
+Now using the relaxed priors:
+
+```{r warning = TRUE}
+model_formula2 <- alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + b[treatment], 
+        a[actor] ~ dnorm(0, 10), 
+        b[treatment] ~ dnorm(0, 0.5)
+)
+quap_model2 <- quap(model_formula2, data = dat_list)
+mcmc_model2 <- ulam(model_formula2, data = dat_list, chains = 4, iter = 4000, log_lik = TRUE, refresh = 0)
+```
+
+Comparing the model posterior:
+```{r fig.height=9}
+plot(coeftab(quap_model2, mcmc_model2, mcmc_model), pch = 16)
+```
+
+Again, the difference is only in the second actor's intercept, and the difference is much larger this time. The quadratic approximation and the MCMC are both much different that the earlier models. The quadratic approximation is much closer to the original estimate though.
+
+Again looking their specific distributions:
+```{r}
+postq2 <- extract.samples(quap_model2)
+postm2 <- extract.samples(mcmc_model2)
+dens(postq2$a[,2], col = 'black', main = paste0('a[',2,']'))
+dens(postm2$a[,2], col = 'blue', add = TRUE)
+legend("topright", legend = c('quap', 'mcmc'), col = c("black","blue"), lty = 1)
+```
+
+The MCMC derives a much more rightly skewed distribution this time. The second actor always pulled the left lever. To get the probability of 1 in the linear model (logit(p) <- a[actor] + b[treatment]), any large value for a works. This asymmetry in action is preserved by the MCMC while the quadratic approximation has to make a symmetric distribution, leading to the difference seen above. 
+
+## 11M8
+> Revisit the data(Kline) islands example. This time drop Hawaii from the sample and refit the models. What changes do you observe?
+
+Load and pre-process data
+
+```{r}
+library(rethinking)
+data("Kline")
+d <- Kline
+d$P <- scale(log(d$population))
+d$contact_id <- ifelse(d$contact == "high", 2, 1)
+dat_no_hawaii <- list(
+    T = d$total_tools[-10], 
+    P = d$P[-10], 
+    cid = d$contact_id[-10]
+)
+dat <- list(
+    T = d$total_tools, 
+    P = d$P, 
+    cid = d$contact_id
+)
+
+```
+
+Duplicating the models from the text:
+```{r}
+# intercept only
+m11.9_orig <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a, 
+        a ~ dnorm(3, 0.5)
+    ), data = dat, chains = 4, log_lik = TRUE, refresh = 0
+)
+
+# interaction model
+m11.10_orig <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a[cid] + b[cid] * P, 
+        a[cid] ~ dnorm(3, 0.5), 
+        b[cid] ~ dnorm(0, 0.2) 
+    ), data = dat, chains = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+Creating the two models (with and without intercept)
+```{r}
+# intercept only
+m11.9 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a, 
+        a ~ dnorm(3, 0.5)
+    ), data = dat_no_hawaii, chains = 4, log_lik = TRUE, refresh = 0
+)
+
+# interaction model
+m11.10 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a[cid] + b[cid] * P, 
+        a[cid] ~ dnorm(3, 0.5), 
+        b[cid] ~ dnorm(0, 0.2) 
+    ), data = dat_no_hawaii, chains = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+Comparing the two models without the intercept:
+```{r}
+precis(m11.9)
+precis(m11.9_orig)
+```
+
+We get a slightly lower mean on the model without Hawaii. Remember, on the total_tools vs population, Hawaii was an extreme observation very much to the right. Removing it, we get a lower average for the total_tools. 
+
+For the model with the intercept, let's compare using the posterior predictions.
+```{r}
+library(dplyr, warn.conflicts = TRUE)
+library(scales)
+library(ggplot2)
+library(tidyr)
+# set up the horizontal zxis values to compute predictions at
+ns <- 100
+P_seq <- seq(from = -1.4, to = 3, length.out = ns)
+
+P_scale <- attributes(dat$P)$'scaled:scale'
+P_center <- attributes(dat$P)$'scaled:center'
+real_scale <- function(x) exp(x * P_scale + P_center)
+
+# function to get mean predictions and credible interval
+get_preds <- function(model){
+    
+    lambda <- link(model, data = data.frame(P = P_seq, cid = 1))
+    lmu <- apply(lambda, 2, mean)
+    lci <- apply(lambda, 2, PI)
+
+    lambda2 <- link(model, data = data.frame(P = P_seq, cid = 2))
+    lmu2 <- apply(lambda2, 2, mean)
+    lci2 <- apply(lambda2, 2, PI)
+    
+    tibble(mu = c(lmu, lmu2), 
+           min = c(lci[1,], lci2[1,]), 
+           max = c(lci[2,], lci2[2,]), 
+           cid = rep(c(1,2), each = length(P_seq)), 
+           P = rep(real_scale(P_seq), 2))
+}
+
+orig_model_preds <- get_preds(m11.10_orig)
+new_preds        <- get_preds(m11.10)
+
+all_preds <- bind_rows(orig_model_preds %>% mutate(id = 'With Hawaii'), 
+                       new_preds %>% mutate(id = 'Without Hawaii')) %>% 
+    mutate(cid = factor(cid, labels = c("Low", "High")))
+
+# Original point data
+d2 <- mutate(d, 
+             cid = factor(contact_id, labels = c("Low", "High")), 
+             P_real = real_scale(P))
+
+ggplot(all_preds, aes(x = P, y = mu)) + 
+    geom_line(aes(linetype = id), size = 1) + 
+    geom_ribbon(aes(ymin = min, ymax = max, fill = id), alpha = 0.5) + 
+    facet_wrap(~cid) + 
+    geom_point(aes(P_real, total_tools), 
+               data = d2,
+               colour = '#1e59ae') + 
+    scale_x_continuous(labels = comma, 
+                       limits = c( real_scale( c(-2, 2.4) ) ) 
+                       ) + 
+    labs(x = "population", 
+         y = "total tools", 
+         title = "posterior predictions of model with and without hawaii")
+```
+
+For high contact the posterior predictions are pretty much the same for the two models. For low contact however, removing Hawaii results in a much lower trend. In fact after removing Hawaii, we get a posterior where the High contact always trends above Low contact. This is more easily visible in the next graph. 
+
+```{r}
+ggplot(all_preds, aes(x = P, y = mu, fill = cid)) + 
+    geom_line(aes(linetype = cid), size = 1) + 
+    geom_ribbon(aes(ymin = min, ymax = max), alpha = 0.5) + 
+    facet_wrap(~id) + 
+    geom_point(aes(P_real, total_tools), 
+               data = d2,
+               colour = '#1e59ae') + 
+    scale_x_continuous(labels = comma, 
+                       limits = c( real_scale( c(-2, 2.4) ) ) 
+                       ) + 
+    labs(x = "population", 
+         y = "total tools", 
+         title = "posterior predictions of model with and without hawaii",
+         subtitle = "Without Hawaii, High always trends above Low contact")
+```
+
+# Hard Questions
+
+## 11H1
+> Use WAIC or PSIS to compare the chimpanzee model that includes a unique intercept for each actor, m11.4 (page 330), to the simpler models fit in the same section. Interpret the results.
+
+Load and process data and build the models:
+```{r}
+library(rethinking)
+data(chimpanzees)
+d <- chimpanzees
+d$treatment <- 1 + d$prosoc_left + 2 * d$condition
+
+dat_list <- list(
+    pulled_left = d$pulled_left, 
+    actor = d$actor, 
+    treatment = as.integer(d$treatment)
+)
+```
+
+Build the two versions of the model:
+```{r}
+# simpler model
+m11.3 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a + b[treatment], 
+        a ~ dnorm(0, 1.5), 
+        b[treatment] ~ dnorm(0, 0.5)
+    ), data = dat_list, chains = 4, log_lik = TRUE, refresh = 0
+)
+
+# model with separate intercept for each actor
+m11.4 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + b[treatment], 
+        a[actor] ~ dnorm(0, 1.5), 
+        b[treatment] ~ dnorm(0, 0.5)
+    ), data = dat_list, chains = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+Comparing th two models:
+
+```{r}
+compare(m11.3, m11.4, func = PSIS)
+```
+
+`m11.4`, the model with a unique intercept seems to be much better than the model without a unique intercept for each actor. dPSIS is 150 here with dSE very small in comparison at 18.39 so the difference seems to be significant enough. 
+
+## 11H2
+> The data contained in library(MASS);data(eagles) are records of salmon pirating attempts by Bald Eagles in Washington State. See ?eagles for details. While one eagle feeds, sometimes another will swoop in and try to steal the salmon from it. Call the feeding eagle the “victim” and the thief the “pirate.” Use the available data to build a binomial GLM of successful pirating attempts.
+
+> (a) Consider the following model:
+
+$$
+\begin{align}
+y_i &\sim \operatorname{Binomial}(n_i, p_i) \\
+logit(p_i) &= \alpha + \beta_P P_i + \beta_V V_i + \beta_A A_i \\
+\alpha &\sim \operatorname{Normal}(0, 1.5) \\
+\beta_P, \beta_V, \beta_A &\sim \operatorname{Normal}(0, 0.5)
+\end{align}
+$$
+
+> where __y__ is the number of successful attempts, __n__ is the total number of attempts, __P__ is a dummy variable indicating whether or not the pirate had large body size, __V__ is a dummy variable indicating whether or not the victim had large body size, and finally __A__ is a dummy variable indicating whether or not the pirate was an adult. Fit the model above to the eagles data, using both quap and ulam. Is the quadratic approximation okay?
+
+> (b) Now interpret the estimates. If the quadratic approximation turned out okay, then it’s okay to use the quap estimates. Otherwise stick to ulam estimates. Then plot the posterior predictions. Compute and display both (1) the predicted probability of success and its 89% interval for each row(i) in the data, as well as (2) the predicted success count and its 89% interval. What different information does each type of posterior prediction provide?
+
+> (c) Now try to improve the model. Consider an interaction between the pirate’s size and age (immature or adult). Compare this model to the previous one, using WAIC. Interpret.
+
+Load Data and process:
+```{r}
+library(MASS)
+data("eagles")
+d <- eagles %>% 
+    mutate(across(c(P, V), ~ifelse(.x == "S", 1, 2)), # 1 small,    2 large
+           A = ifelse(A == "I", 1, 2))                # 1 Immature, 2 Adult
+d
+```
+
+We have a case of aggregated binomial. Let's build the model:
+
+```{r}
+model_formula <- alist(
+    y             ~ dbinom(n, p), 
+    logit(p)      <- a + bp*P + bv * V + ba * A, 
+    a             ~ dnorm(0, 1.5), 
+    c(bp, bv, ba) ~ dnorm(0, 0.5)
+)
+
+eagle_quap <- quap(model_formula, data = d)
+eagle_ulam <- ulam(model_formula, data = d, chains = 4, refresh = 0, log_lik = TRUE)
+```
+
+Looking at the estimates for the `quap` model:
+```{r}
+precis(eagle_quap)
+```
+
+Looking at the estimates for the `ulam` model:
+```{r}
+precis(eagle_ulam)
+```
+
+Both the models produce almost same results:
+```{r}
+plot(coeftab(eagle_quap, eagle_ulam))
+```
+
+From the estimates, we get:
+
+- if the "Pirate" bird (the one stealing) had a large body, that increased the chances of stealing
+- "Victim" bird's large size prevented steal
+- Adult "Pirate"s had a higher chance of stealing
+
+```{r}
+library(patchwork)
+
+posterior_plot <- function(model){
+    preds <- link(model)
+    sim <- sim(model)
+    p_mean <- colMeans(preds)
+    p_ci <- apply(preds, 2, PI)
+    y_mean <- colMeans(sim)
+    y_ci <- apply(sim, 2, PI)
+    
+    
+    plot_data <- tibble(mu = p_mean, y_mu = y_mean,  
+                        mu_min = p_ci[1,],  mu_max = p_ci[2,],
+                        y_min = y_ci[1,],  y_max = y_ci[2,]) %>% 
+        bind_cols(d) %>% 
+        mutate(id = 1:n(), 
+               pct = y / n)
+    
+    p1 <- ggplot(plot_data, aes(id)) + 
+        geom_point(aes(y = pct, colour = "Original"), size = 2) + 
+        geom_point(aes(y = mu, colour = "Predicted"), size = 2) + 
+        geom_linerange(aes(ymin = mu_min, ymax = mu_max)) + 
+        scale_x_continuous(breaks = 1:8) + 
+        labs(x = "Bird", 
+             y = "Proportion of success", 
+             title = "Posterior predictions (probability scale)", 
+             colour = "") + 
+        theme_classic()
+    
+    p2 <- ggplot(plot_data, aes(id)) + 
+        geom_point(aes(y = y, colour = "Original"), size = 2) + 
+        geom_point(aes(y = y_mu, colour = "Predicted"), size = 2) + 
+        geom_linerange(aes(ymin = y_min, ymax = y_max)) + 
+        scale_x_continuous(breaks = 1:8) + 
+        labs(x = "Bird", 
+             y = "Number of successes", 
+             title = "Posterior predictions (Counts)", 
+             colour = "") + 
+        theme_classic()
+    list(p1, p2)
+    
+}
+
+plots <- posterior_plot(eagle_quap)
+plots[[1]] / plots[[2]]
+```
+
+For the predicted probabilities, the model does a good job predicting for birds 1 and 3, but over or underpredicts for all the other birds.
+On the count scale, most of the actual counts fall within the expected 89% credible interval. 
+
+The probability plot however, allows us to compare the 8 cases in spite of the difference in number of trials. On the counts graph, the number of counts as well as the binomial process comes into picture (instead of just p, we are looking at B(N,p)), so there's an added amount of uncertainty. 
+
+Next, we will consider an interaction between pirate's size and age. Since `quap` did a good job with the provided priors, let's continue with it. 
+
+```{r}
+# using the same approach as in the chimpanzees example to create the interaction term
+d$AP <- 1 + (d$P-1) + 2 * (d$A - 1)
+```
+
+Thus we have, for AP =
+
+- 1 - Pirate is young and small
+- 2 - Pirate is young and big
+- 3 - Pirate is adult and small
+- 4 - Pirate is adult and big
+
+```{r}
+eagle_int <- ulam(
+    alist(
+        y ~ dbinom(n, p), 
+        logit(p) <- a + bv*V + bi[AP], 
+        a ~ dnorm(0, 1.5), 
+        bv ~ dnorm(0, 0.5), 
+        # c(ba, bp) ~ dnorm(0, 0.5), 
+        bi[AP] ~ dnorm(0, 1.5)
+    ), data = d, chains = 4, refresh = 0, log_lik = TRUE
+)
+compare(eagle_ulam, eagle_int, func = WAIC)
+```
+
+dSE is almost the same as dWAIC, so we can't say one is better than the other. But WAIC seems to put most of the weight on eagle_int for predictions.  
+
+Let's look at the posterior predictions of the two models:
+
+```{r}
+plots2 <- posterior_plot(eagle_int)
+{ (plots[[1]] + geom_hline(yintercept = 0.5, lty = 2)) /
+        (plots2[[1]] + geom_hline(yintercept = 0.5, lty = 2))
+}
+```
+
+The plot on the top is from the earlier model, the one on the bottom is from the model with the interaction term. The prediction seem to more closely match with the observed counts now. 
+
+
+## 11H3
+> The data contained in data(salamanders) are counts of salamanders (Plethodon elongatus) from 47 different 49m^2 plots in northern California. The column SALAMAN is the count in each plot, and the columns PCTCOVER and FORESTAGE are percent of ground cover and age of trees in the plot, respectively. You will model SALAMAN as a Poisson variable. 
+
+> (a) Model the relationship between density and percent cover, using a log-link (same as the example in the book and lecture). Use weakly informative priors of your choosing. Check the quadratic approximation again, by comparing quap to ulam. Then plot the expected counts and their 89% interval against percent cover. In which ways does the model do a good job? A bad job? 
+
+> (b) Can you improve the model by using the other predictor, FORESTAGE? Try any models you think useful. Can you explain why FORESTAGE helps or does not help with prediction?
+
+[Link to Original Paper](https://www.fs.fed.us/psw/publications/welsh/welsh8.pdf)
+
+```{r}
+data("salamanders")
+d <- salamanders
+head(d)
+```
+
+```{r}
+d$G <- d$PCTCOVER/100
+d$FR <- log1p(d$FORESTAGE)
+```
+
+We will make the following model:
+
+$$
+\begin{align}
+\text{Salamander} &\sim \operatorname{Poisson}(\lambda) \\
+\log \lambda_i &= \alpha + \beta_G G \\
+\alpha &\sim \text{TBD} \\
+\beta_G &\sim \text{TBD}
+\end{align}
+$$
+
+
+The number of salamanders in an area typically ranges from 0 to 100 [link](https://www.nature.com/articles/s41598-018-25704-1#:~:text=Abundance%20and%20density%20of%20populations&text=The%20estimated%20number%20of%20salamanders,±%200.03%20individuals%2Fm2.) So we can use a similar prior as in the text for the alpha (Normal(3, 0.5)). 
+
+For Beta, Normal(0, 1) seems fine. 
+
+```{r}
+set.seed(10)
+N <- 100
+a <- rnorm(N, 3, 0.5)
+b <- rnorm(N, 0, 1)
+plot(NULL, xlim = c(0, 1), ylim = c(0, 150), xlab = "Percent Ground Cover", ylab = "Salamander Count")
+mtext("b ~ dnorm(0, 1)")
+for(i in 1:N)
+    curve( exp(a[i] + b[i] * x), add = TRUE, col = grau(), from = 0, to = 1)
+```
+
+
+
+```{r}
+dat_list <- list(salamander = d$SALAMAN, 
+                 site = d$SITE, 
+                 G = d$G, 
+                 FR = d$FR)
+model_formula <- alist(
+    salamander ~ dpois(lambda), 
+    log(lambda) <- a + bg*G, 
+    a ~ dnorm(3, 0.5),
+    bg ~ dnorm(0, 1)
+)
+sal_quap <- quap(model_formula, data = dat_list)
+sal_ulam <- ulam(model_formula, data = dat_list, chains = 4, refresh = 0, log_lik = TRUE, iter = 2000)
+```
+
+```{r}
+plot(coeftab(sal_quap, sal_ulam))
+```
+
+We get similar predictions from both. 
+
+```{r}
+# postcheck(sal_ulam, prob = 0.89, window = 50)
+
+# helper function to get posterior predictions
+get_posterior_preds <- function(model, actual){
+    preds <- link(model)
+    y <- sim(model)
+    preds_mu <- colMeans(preds)
+    preds_ci <- apply(preds, 2, PI)
+    
+    y_ci <- apply(y, 2, PI)
+    
+    tibble(mu = preds_mu, 
+           mu_min = preds_ci[1,], 
+           mu_max = preds_ci[2,], 
+           y_min  = y_ci[1,], 
+           y_max  = y_ci[2,], 
+           id = 1:length(preds_mu), 
+           actual = actual)
+}
+
+# helper function similar to postcheck from rethinking
+posterior_check <- function(model, actual){
+    tbl <- get_posterior_preds(model, actual)
+    ggplot(tbl, aes(x = id)) + 
+        geom_point(aes(y = actual, colour = "Actual")) + 
+        geom_point(aes(y = mu, colour = "Posterior")) + 
+        geom_linerange(aes(ymin = mu_min, ymax = mu_max)) + 
+        geom_point(aes(y = y_min), shape = 3) + 
+        geom_point(aes(y = y_max), shape = 3) + 
+        theme(legend.position = "top") + 
+        labs(colour = "")
+    
+}
+
+posterior_check(sal_ulam, d$SALAMAN)
+```
+
+Our posterior predictions don't do very well on the actual data, with most counts outside even the posterior credible intervals. 
+
+We will now try to use FORESTAGE as a predictor. 
+
+$$
+\begin{align}
+\text{Salamander} &\sim \operatorname{Poisson}(\lambda) \\
+\log \lambda_i &= \alpha + \beta_P G + \beta_F F \\
+\alpha &\sim \text{Normal}(3, 0.5) \\
+\beta_G &\sim \text{Normal}(0, 1) \\
+\beta_F &\sim \text{TBD}
+\end{align}
+$$
+We now need a prior for the age of trees as well. Since we have standardised it above, we expect it to range mostly between 0 to 7 (age 0-1000 years). By trial and error we settle upon the prior of Normal(0, 0.2) for this new parameter that mostly keeps our salamander count mostly flat and between 0-100.
+
+```{r}
+set.seed(10)
+N <- 100
+a <- rnorm(N, 3, 0.5)
+b <- rnorm(N, 0, 1)
+f <- rnorm(N, 0, 0.2)
+age_seq <- seq(0,7, length.out = N)
+plot(NULL, xlim = c(0, 1), ylim = c(0, 150), xlab = "Percent Ground Cover", ylab = "Salamander Count")
+for(i in 1:N)
+    curve( exp(a[i] + b[i] * x + f[i] * log(age_seq[i])), add = TRUE, col = grau(), from = 0, to = 1)
+```
+
+Modelling:
+
+```{r}
+model_formula2 <- alist(
+    salamander ~ dpois(lambda), 
+    log(lambda) <- a + bg*G + bf * FR, 
+    a ~ dnorm(3, 0.5),
+    bg ~ dnorm(0, 1), 
+    bf ~ dnorm(0, 0.2)
+)
+sal_quap2 <- quap(model_formula2, data = dat_list)
+sal_ulam2 <- ulam(model_formula2, data = dat_list, chains = 4, refresh = 0, log_lik = TRUE, iter = 2000)
+```
+
+```{r}
+compare(sal_ulam, sal_ulam2, func = WAIC)
+```
+
+Comparing the two models the difference between them isn't too great and dSE is higher than dWAIC. So not much difference in terms of prediction. 
+
+```{r}
+plot(coeftab(sal_ulam, sal_ulam2))
+```
+
+the coefficient for forestage is very close to zero. The coefficient of ground cover seems to have increased by a similar amount. 
+
+Trying out a model with only forest age as predictor. We do another prior check and flatten the prior to allow it to take greater values:
+
+```{r}
+model_formula3 <- alist(
+    salamander ~ dpois(lambda), 
+    log(lambda) <- a + bf * FR, 
+    a ~ dnorm(3, 0.5),
+    bf ~ dnorm(0, 1)
+)
+sal_quap3 <- quap(model_formula3, data = dat_list)
+compare(sal_quap, sal_quap3, sal_quap2)
+```
+
+This seems to do significantly worse than the earlier two models. So forest age does not seem to help much with prediction. Another try without taking log of forest age does not seem any better results either. 
+
+Trying interaction after binning forest age into two ranges, 0-100 years, > 100 years. 
+
+```{r}
+dd <- dat_list
+dd$FR <- ifelse(dat_list$FR < log1p(100), 1, 2)
+model_formula4 <- alist(
+    salamander ~ dpois(lambda), 
+    log(lambda) <- a + bg[FR]*G, 
+    a ~ dnorm(3, 0.5),
+    bg[FR] ~ dnorm(0, 1)
+)
+sal_quap4 <- quap(model_formula4, data = dd)
+compare(sal_quap, sal_quap2, sal_quap4)
+```
+
+Not much better. It is possible that percent ground cover and age of trees are correlated and thus providing the same information, which is why we don't see much effect from forest age after including both the variables. 
+
+
+## 11H4
+> The data in data(NWOGrants) are outcomes for scientific funding applications for the Netherlands Organization for Scientific Research (NWO) from 2010–2012 (see van der Lee and Ellemers (2015) for data and context). These data have a very similar structure to the UCBAdmit data discussed in the chapter. I want you to consider a similar question: What are the total and indirect causal effects of gender on grant awards? Consider a mediation path (a pipe) through discipline. Draw the corresponding DAG and then use one or more binomial GLMs to answer the question. What is your causal interpretation? If NWO’s goal is to equalize rates of funding between men and women, what type of intervention would be most effective?
+
+Loading in data:
+```{r}
+library(rethinking)
+data("NWOGrants")
+d <- NWOGrants
+d
+```
+
+First let us visualise the data first:
+
+```{r}
+d %>% 
+    mutate(pct_awarded = awards/applications,
+           discipline = reorder(discipline, pct_awarded), 
+           gender = ifelse(gender == 'm', "Male", "Female")) %>% 
+    tidyr::pivot_longer(cols = c(applications, pct_awarded)) %>% 
+    ggplot(aes(y = discipline, x = value)) + 
+    geom_col(aes(fill = gender), position = "dodge") + 
+    # scale_x_continuous(labels = percent) + 
+    guides(fill = guide_legend(reverse = TRUE)) + 
+    facet_wrap(~name, scales = "free_x") + 
+    labs(x = "", 
+         title = "Distribution of Awards/Applications across various disciplines", 
+         fill = "Gender")
+```
+
+From the above graph we can see that there is a disparity between the number of applications across disciplines as well as in the percentage of applications that receive awards. So there is definitly an effect of discipline. 
+
+Let's consider a DAG where gender affects choice of discipline as well as number of awards and displine effects the number of awards as well. 
+
+```{r fig.width=3, fig.height=3}
+library(dagitty)
+library(ggdag)
+nwo_dag <- dagitty("dag{
+                   G -> D -> A
+                   G -> A
+}")
+coordinates(nwo_dag) <- list(
+    x = c(G = 0, A = 1, D = 0.5), 
+    y = c(G = 0, A = 0, D = 1)
+)
+
+ggdag(nwo_dag) + theme_void()
+```
+
+Modelling:
+
+```{r}
+d$D <- coerce_index(d$discipline)
+d$G <- ifelse(d$gender == 'm', 1, 2)
+
+dat_list <- list(applications = d$applications, 
+                 awards       = d$awards, 
+                 D            = d$D, 
+                 G            = d$G)
+
+nwo_mod <- ulam(
+    alist(
+        awards ~ dbinom(applications, p), 
+        logit(p) <- a[G] + b[D], 
+        a[G] ~ dnorm(0, 1.5), 
+        b[D] ~ dnorm(0, 1.5)
+    ), data = dat_list, chains = 4, refresh = 0, log_lik = TRUE, iter = 4000
+)
+precis(nwo_mod, depth = 2, pars = "a")
+```
+
+The intercept for females "a[2]" is less than that of males. Checking the contrast on the logit and outcome scale:
+
+```{r}
+post <- extract.samples(nwo_mod)
+diff_a <- post$a[,1] - post$a[,2]
+diff_p <- inv_logit(post$a[,1]) - inv_logit(post$a[,2])
+precis(list(logit = diff_a, outcome = diff_p))
+```
+
+We see only a minor difference, with females worse off by 2% on average. 
+
+Let us look at the posterior for disciplines:
+```{r}
+b <- as.data.frame( precis(nwo_mod, 2, pars = 'b') )
+b$discipline <- as.character(levels(d$discipline))
+
+b[order(b$mean, decreasing = TRUE),] %>% 
+    # select(-n_eff, Rhat4, discipline) %>% 
+    mutate(across(-discipline, round, 2))
+```
+The above is ordered in decreasing order of awards granted, and this seems to line up with our earlier EDA plot where Chemical sciences had the highest award rate and Social Sciences with the lowest. 
+
+```{r}
+postcheck(nwo_mod)
+```
+
+The model's predictions do tend to agree with the observed counts. It seems this is a very similar case to the UCB Admissions case, with disparity between the awards rate for different disciplines and a gender split in applications sent across disciplines.
+
+Looking at the rates of applications sent to different disciplines by gender:
+
+```{r}
+dplyr::select(d, gender, applications, discipline) %>% 
+    tidyr::pivot_wider(names_from = gender, values_from = applications) %>% 
+    janitor::adorn_percentages(denominator = "row") %>% 
+    janitor::adorn_pct_formatting(digits = 0)
+```
+
+So it seems, women are sending more applications to disciplines such as Social sciences and Medical Sciences which have lower awards rate, with much fewer applications sent to disciplines like Chemical and Physical Sciences which have much higher awards rate. 
+
+For NWO's goal of equalizing rates of funding between men and women, the award rate across the divisions could be made more uniform. Another approach would be to try and attract more female talent in the Chemical/Physical Science fields. 
+
+## 11H5
+> Suppose that the NWO Grants sample has an unobserved confound that influences both choice of discipline and the probability of an award. One example of such a confound could be the career stage of each applicant. Suppose that in some disciplines, junior scholars apply for most of the grants. In other disciplines, scholars from all career stages compete. As a result, career stage influences discipline as well as the probability of being awarded a grant. Add these influences to your DAG from the previous problem. What happens now when you condition on discipline? Does it provide an un-confounded estimate of the direct path from gender to an award? Why or why not? Justify your answer with the backdoor criterion. If you have trouble thinking this though, try simulating fake data, assuming your DAG is true. Then analyze it using the model from the previous problem. What do you conclude? Is it possible for gender to have a real direct causal influence but for a regression conditioning on both gender and discipline to suggest zero influence?
+
+Let's add career stage as an influence for both discipline and award.
+
+```{r}
+nwo_dag <- dagitty("dag{
+                   G [exposure]
+                   A [outcome]
+                   C [unobserved]
+                   G -> D -> A
+                   G -> A
+                   D <- C -> A
+}")
+coordinates(nwo_dag) <- list(
+    x = c(G = 0, A = 1, C = 1, D = 0 ), 
+    y = c(G = 0, A = 0, C = 1, D = 1)
+)
+
+# ggdag(nwo_dag) + theme_void()
+drawdag(nwo_dag)
+drawopenpaths(nwo_dag, col_arrow = "navyblue", lwd = 2)
+```
+
+Let's consider the paths from G -> A (Gender to Awards):
+
+- G -> A (direct path)
+- G -> D -> A (pipe)
+
+Expanding the second path above we have:
+
+- A <- C -> D <- G -> A (backdoor from C to D)
+
+G & C collide at A and D. For the G -> D <- C collider, conditioning on D will show association between G and C. C is however unobserved, but we believe that C influences A, this will lead to showing association between G and A as well even if there is no association in reality. So we should not condition on D if we want to study the effect of G on A. Confirming the same via `dagitty`:
+
+```{r}
+adjustmentSets(nwo_dag, exposure = "G", outcome = "A")
+```
+
+> Simulating fake data to confirm above
+
+- Assume 5k applications sent from different disciplines
+- Different number of applications per discipline
+- Different disciplines have different number of female/male applicants
+- Career stage is simplified as senior vs junior scholars
+- Different disciplines have different number of junior/senior applicants
+- the number of grants awarded is then decided using the DAG above such that it is influenced by both gender and career stage, specifically females and junior scholars are awarded less grants
+
+Two models are then created, one that conditions on discipline and one that does not. We confirm our reasoning above and see that the one that does not condition on discipline correctly shows the greater disparity in grant rate between male/females, while the former shows a much smaller effect of gender.
+
+```{r}
+set.seed(116)
+N <- 5000 # assume 5000 application sent in total
+
+disciplines <- levels(d$discipline)
+
+# divide 5000 applications to the 9 discipline
+discipline <- sample(disciplines, N, replace = TRUE, prob = runif(9, 0.2, 0.8))
+
+# divide 5000 applications among female/male and junior/senior
+female <- sample(c(0,1), N, replace = TRUE, prob = runif(2, 0.3, 0.7))
+junior <- sample(c(0, 1), N, replace = TRUE, prob = runif(2, 0.5, 0.7))
+
+# general rate of grants awarded as a proportion of applications sent
+general_grant_rate <- setNames(runif(9, 0.1, 0.4), disciplines)
+junior_penalty <- 0.5     # penalty to junior scholars in rate of grant
+female_penalty <- 0.6     # penalty to females
+
+# function to compute rate of grants awarded given discipline, career stage and gender
+grant_rate <- function(discipline, junior, female){
+    general_grant_rate[discipline] * (junior_penalty) ^ junior * (female_penalty)^female
+}
+
+# combine all of above into a single data frame
+# and then create an aggregate data set
+test <- tibble(discipline, female, junior) %>% 
+    count(discipline, female, junior, name = "applications") %>% 
+    mutate(award = round(applications * grant_rate(discipline, junior, female)), 
+           D = coerce_index(factor(discipline)), 
+           G = ifelse(female, 2, 1), 
+           S = ifelse(junior, 2, 1), 
+           pct = award / applications)
+
+# simplified data set
+dat_list <- with(test, list(applications = applications, 
+                 award = award, 
+                 D = D, 
+                 G = G, 
+                 S = S))
+
+# model that conditions on D
+model1 <- ulam(
+    alist(
+        award ~ dbinom(applications, p), 
+        logit(p) <- a[G] + b[D], 
+        a[G] ~ dnorm(0, 1.5), 
+        b[D] ~ dnorm(0, 1.5)
+    ), data = dat_list, chains = 4, iter = 4000, refresh = 0
+)
+
+# model that does not condition on D
+model2 <- ulam(
+    alist(
+        award ~ dbinom(applications, p), 
+        logit(p) <- a[G], 
+        a[G] ~ dnorm(0, 1.5)
+    ), data = dat_list, chains = 4, iter = 4000, refresh = 0
+)
+
+diff_outcome_scale <- function(model) {
+    post <- extract.samples(model)
+    inv_logit(post$a[,1]) - inv_logit(post$a[,2])
+}
+
+diff_p_condition_d <- diff_outcome_scale(model1)
+diff_p_no_condition <- diff_outcome_scale(model2)
+precis(list(model1 = diff_p_condition_d, model2 = diff_p_no_condition))
+```
+
+If we just look at the means, then the difference between the two models does not seem that extreme, however, if we look their credible intervals, the model that conditions on D has a much wider interval for the difference due to gender whereas the model that does not condition has a narrower credible interval, granting more credibility to the idea that there is a gender bias. 
+
+> There could be issues with the simulation above that I have not yet realised, without which, we will see difference in the means of the difference between the genders as well. 
+
+## 11H6
+> The data in data(Primates301) are 301 primate species and associated measures. In this problem, you will consider how brain size is associated with social learning. There are three parts. 
+
+>(a) Model the number of observations of social_learning for each species as a function of the log brain size. Use a Poisson distribution for the social_learning outcome variable. Interpret the resulting posterior. 
+
+> (b) Some species are studied much more than others. So the number of reported instances of social_learning could be a product of research effort. Use the research_effort variable, specifically its logarithm, as an additional predictor variable. Interpret the coefficient for log research_effort. Howdoes this model differ from the previous one? 
+
+> (c) Draw a DAG to represent how you think the variables social_learning, brain, and research_effort interact. Justify the DAG with the measured associations in the two models above (and any other models you used).
+
+```{r}
+data("Primates301")
+d <- Primates301
+head(d[,c("species", "social_learning", "brain", "research_effort")])
+```
+
+There are some NAs in the data, so let's filter them out. 
+
+```{r}
+d <- Primates301 %>% 
+    dplyr::select(species, social_learning, brain, research_effort, spp_id) %>% 
+    na.omit() %>% 
+    droplevels()
+dim(d)
+```
+
+Out of 301, we have now 150 rows left. 
+
+```{r}
+dat_list <- list(species = coerce_index(d$species), 
+                 sl = d$social_learning, 
+                 brain = log(d$brain), 
+                 research = log(d$research_effort))
+```
+
+Model will be:
+
+$$
+\begin{align}
+\text{social_learning} &\sim \operatorname{Poisson}(\lambda) \\
+\log \lambda_i &= \alpha\text{} + \beta\text{} \log (x - \bar x) \\
+\alpha\text{} &\sim  \text{Normal}(3, 0.5)  \\
+\beta\text{} &\sim \text{Normal}(0, 0.2)
+\end{align}
+$$
+where $x$ is the brain size. 
+
+> priors for beta
+
+prior for alpha can be the same as before, we expect values to range between 0-100 with probably some extreme values.
+For beta, we imagine that brain volume for primates (which includes from birds to gorillas) ranges in the [5-1000] cc range. 
+
+```{r}
+N <- 100
+a <- rnorm(N, 3, 0.5)
+b <- rnorm(N, 0, 0.2)
+plot(NULL, xlim = c(2, 7), ylim = c(0, 200), xlab = "log brain size", ylab = "social learning")
+mtext("b ~ dnorm(0, 0.1)")
+for(i in 1:N)
+    curve( exp(a[i] + b[i] * x), add = TRUE, col = grau(), from = log(5), to = log(1000))
+```
+
+We settle down on Normal(0, 0.2)
+
+Modelling:
+
+```{r}
+prim_mod1 <- ulam(
+    alist(
+        sl ~ dpois(lambda), 
+        log(lambda) <- a + b * brain, 
+        a ~ dnorm(3, 0.5), 
+        b ~ dnorm(0, 0.2)
+    ), data = dat_list, chains = 4, iter = 4000, log_lik = TRUE, refresh = 0
+)
+
+precis(prim_mod1)
+```
+
+The parameter estimate for brain size is around 1.57. Taking exponent, we get 4.81, thus we expect lambda to increase by this amount for a unit increase in log brain mass. 
+Or rather looking at the equation:
+
+$$
+\begin{align}
+\log \lambda = \alpha + 1.57 \log B \\
+\text{Taking exponent of each side}  \\
+\lambda = exp(-5.7) B^{1.57} \\
+\lambda = 0.0033 B ^ {1.57}
+\end{align}
+$$
+Thus the rate of social learning has a power function with brain size with power 1.57.
+
+Plotting the posterior for a better look at the model
+
+```{r}
+post <- extract.samples(prim_mod1)
+brain_seq <- seq(from = min(dat_list$brain), to = max(dat_list$brain), length.out = 100)
+
+lambda <- link(prim_mod1, data = list(brain = brain_seq))
+lmu <- colMeans(lambda)
+lci <- apply(lambda, 2, PI)
+
+simy <- sim(prim_mod1, data = list(brain = brain_seq))
+simy_ci <- apply(simy, 2, PI)
+
+plot(exp(dat_list$brain), dat_list$sl, pch = 16, xlab = "brain size (grams)", ylab = "social learning instances")
+lines(exp(brain_seq), lmu)
+shade(simy_ci, exp(brain_seq), col = col.alpha('lightblue', alpha = 0.7))
+shade(lci, exp(brain_seq))
+
+pareto_k <- PSIS(prim_mod1, pointwise = TRUE)$k
+idx <- which(pareto_k > 0.5)
+points(exp(dat_list$brain[idx]), dat_list$sl[idx], pch = 6, cex = 1.5, col = "firebrick", lwd = 2)
+```
+
+The relationship is exponential. The 5 points with high Pareto k value have also been highlighted. 
+
+> Part (b) 
+
+Modelling with `research_effort` added. We use the same prior for both betas.
+
+```{r}
+prim_mod2 <- ulam(
+    alist(
+        sl ~ dpois(lambda), 
+        log(lambda) <- a + bb*brain + br*research, 
+        a ~ dnorm(3, 0.5), 
+        c(bb, br) ~ dnorm(0, 0.2)
+    ), data = dat_list, chains = 4, iter = 4000, log_lik = TRUE, refresh = 0
+)
+compare(prim_mod1, prim_mod2, func = WAIC)
+```
+
+The new model seems to be much better from a predictive point of view, however, the dSE is greater than half of dWAIC, suggesting that the large difference might not be that significant. 
+
+Looking at its coefficients:
+
+```{r}
+precis(prim_mod2)
+```
+
+The coefficient for brain size has reduced a lot now to around 0.2. The coefficient for research effort is 1.31, implying exp(1.31) = 3.7 increase in social learning for each unit increase in log research effort. We will get similar results for coefficient interpretation as before. 
+
+> Part (c)
+
+```{r}
+primate_dag <- dagitty("dag{
+                       SL [outcome]
+                       RE [exposure]
+                       BR [exposure]
+                       SL <- BR
+                       SL <- RE
+                       
+}")
+ggdag(primate_dag) + theme_void()
+```
+
+We expect brain size to affect social learning. With larger brain sizes in primates, we would expect better showcase of social learning. 
+We postulate that research effort also affects the observed social learning counts. Since we have not studies all species, so species that have not been studies extensively with similar brain size would likely show lower exhibits of social learning. 

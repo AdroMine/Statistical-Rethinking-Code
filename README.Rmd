@@ -25,7 +25,7 @@ These are currently using package `rethinking`.
 
 ```{r}
 chapters <- list.files(pattern = "^Chapter\\d+")
-
+chapters <- gtools::mixedsort(chapters)
 directory <- data.frame(Chapters = chapters, 
                         `Chapter Notes` = NA, 
                         `Chapter EoC Questions` = NA, 
@@ -34,7 +34,7 @@ directory <- data.frame(Chapters = chapters,
 for(i in seq_along(chapters)){
      files <- list.files(chapters[i], include.dirs = FALSE, full.names = TRUE)
      
-     if(grepl("Chapter_\\d+\\.html$", files,ignore.case = TRUE)){
+     if(any(grepl("Chapter_\\d+\\.html$", files,ignore.case = TRUE))){
        note <- grep("Chapter_\\d+\\.html$", files, value = TRUE, ignore.case = TRUE)
        note <- glue("https://adromine.github.io/Statistical-Rethinking-Code/{note}")
      } else {

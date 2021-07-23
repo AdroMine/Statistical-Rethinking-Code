@@ -1,0 +1,326 @@
+---
+title: "Statistical Rethinking Chapter 10"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150)
+```
+
+# Maximum Entropy
+
+Max Entropy Principle
+> The distribution that can happen the most ways is also the distribution with the biggest information entropy. The distribution with the biggest entropy is the most conservative distribution that obeys its constraints.
+
+10 pebbles and 5 buckets. Equally likely to throw in any. 
+
+```{r}
+p <- list(
+    A = c(0, 0, 10, 0, 0), 
+    B = c(0, 1, 8, 1, 0), 
+    C = c(0, 2, 6, 2, 0), 
+    D = c(1, 2, 4, 2, 1), 
+    E = c(2, 2, 2, 2, 2)
+)
+
+# normalising each so that it is a prob distribution
+p_norm <- lapply(p, function(q) q / sum(q))
+
+# calculating information entropy of each 
+entropy <- function(q) -sum(ifelse(q == 0, 0, q * log(q)))
+(H <- sapply(p_norm, entropy) )
+```
+
+Arrangement E has the greatest no of ways to configure as well as the greatest entropy. 
+
+$$
+\begin{align}
+\text{No of ways of arranging E} &= {10 \choose 2 } \times {8 \choose 2} \times {6 \choose 2} \times {4 \choose 2} = 113,400  \\
+&= \frac{10!}{2! \  2! \  2! \  2! \  2!} = 113,400
+\end{align}
+$$
+
+Computing logarith of the no of ways each dist can be realised, and dividing by 10 (the number of pebbles). 
+
+```{r}
+ways <- c(1, 90, 1260, 37800, 113400)
+logwayspp <- log(ways)/10
+
+plot(logwayspp, H, xlab = "log(ways) per pebble", ylab = "entropy", pch = 16)
+abline(lm(H ~ logwayspp), lty = 2, col = 'black')
+text(logwayspp, H, labels = names(p), pos = c(3, 3, 1, 1, 1))
+```
+
+## Gaussian
+
+Generalised normal distribution is defined by the probability density:
+
+$$
+\LARGE
+Pr(y| \mu_, \alpha, \beta) = \frac{\beta}{2 \alpha \Gamma(1/\beta)}e^{- (\frac{ |y - \mu| }{\alpha})^ \beta}
+$$
+In below graph, blue line is normal distribution plus three generalised normal distributions with the same variance. All four have variance = 1. 
+
+```{r fig.width=9}
+library(rethinking)
+shapes <- c(1, 1.5, 4)
+x <- seq(-4, 4, length.out = 1000)
+dist <- vector("list", length(shapes))
+
+for(i in seq_along(shapes)){
+  b <- shapes[i]
+  a <- sqrt(gamma(1/b) / gamma(3/b))
+  dist[[i]] <- dgnorm(x, 0, a, b)
+}
+
+shape_seq <- seq(1, 4, length.out = 50)
+
+entropies <- sapply(shape_seq, function(b) {
+                                a <- sqrt(gamma(1/b) / gamma(3/b))
+                                dist <- dgnorm(x, 0, a, b)
+                                entropy(dist)
+                                }
+) 
+
+withr::with_par(
+    list(mfrow = c(1, 2)), 
+    code = {
+      plot(NULL, xlim = c(-4, 4), ylim = c(0, 0.7), xlab = "value", ylab = "Density")
+      curve(dnorm(x, 0, 1), -4, 4, add = TRUE, col = 'steelblue', lwd = 2)
+      for(i in 1:length(shapes))
+        lines(x, dist[[i]])
+      
+      plot(shape_seq, entropies,xlab = "shape", ylab = "entropy", type = "l", lwd = 2, col = 'steelblue')
+      abline(v = 2, lty = 2)
+      
+    }
+)
+```
+
+Two are more peaked and have thus thicker tails. One is flattter and thinner tails shifting more prob in the middle.
+We also plot entropies for each shape value (keeping variance constant). Entropy maximises when shape = 2, corresponding to perfectly normal distribution. 
+
+## Binomial
+
+
+$$
+\large
+Pr(y|n, p) = \frac{n!}{y!(n − y)!}  p^y(1 − p)^{n−y}
+$$
+
+the fraction with the factorials is just saying how many different ordered sequences of n outcomes have a count y.So a more elementary view is that the probability of any unique sequence ofbinary events y1 through yn is:
+
+$$
+Pr(y_1, y_2, ...y_n|n, p) = p^y (1-p)^{n-y}
+$$
+
+This dist has the highest entropy given following constraints are satisfied:
+
+* only two unordered events
+* constant expected value
+
+Next we have two examples where we fix the expected value to be constant.
+
+### First Example
+
+Bag with unknown number of blue and white balls inside. Two marbles are drawn with replacement. Four possibilities are: ww, bb, wb, and bw. 
+
+Supoose we know that the expected no of blue marbles over two draws is exactly 1. This is the expected value constraint we apply. 
+
+We consider four prob dists. 
+```{r}
+dist <- list(
+  A = c(1/4, 1/4, 1/4, 1/4),    # binomial with n = 2, p = 0.5
+  B = c(2/6, 1/6, 1/6, 2/6),    
+  C = c(1/6, 2/6, 2/6, 1/6), 
+  D = c(1/8, 4/8, 2/8, 1/8)
+)
+
+withr::with_par(
+  list(mfrow = c(2, 2)), 
+  code = {
+    for(i in seq_along(dist)){
+      plot(1:4, dist[[i]], xaxt = "n", yaxt = "n", ylim = c(0, 0.6), 
+           type ="b", axes = FALSE, xlab = "", ylab = "",
+           lwd = 2, col = 'steelblue', pch = 16, )
+      axis(side = 1, at = 1:4, labels = c("ww", "bw", "wb", "bb"), )
+      text(1, 0.45, labels = names(dist)[i], cex = 2)
+    }
+  }
+)
+```
+
+A is the binomial distribution with n = 2, and p = 0.5 (with bw and wb collapsed into same outcome type). 
+
+B, C and D are not binomial but have same expected value. 
+
+```{r}
+sapply(dist, function(p) sum(p * c(0, 1, 1, 2)))
+```
+
+Entropy of each:
+```{r}
+round(sapply(dist, entropy), 3)
+```
+
+A has highest entropy. This is since H increases as probability distribution becomes more even. 
+
+In this example the expected value is 1, which is why the distribution over outcomes can be flat and remain consistent with the constraint. 
+
+## Second Example
+
+Same bag drawing example, but this time the expected value should be 1.4 blue marbles in two draws, thus p = 0.7. The binomial dist with this expectation is:
+
+```{r}
+p <- 0.7 
+( A <- c( (1-p)^2 , p*(1-p) , (1-p)*p , p^2 ) )
+```
+
+Entropy of above:
+```{r}
+entropy(A)
+```
+
+We will now simulate some distributions with same expected value and compare their entropies
+
+```{r}
+sim.p <- function(G=1.4) {
+  x123 <- runif(3) 
+  x4 <- ( (G) * sum(x123) - x123[2] - x123[3] ) / (2-G) 
+  z <- sum( c(x123,x4) ) 
+  p <- c( x123 , x4 )/z 
+  list( H=-sum( p*log(p) ) , p=p )
+}
+H <- replicate( 1e5 , sim.p(1.4) ) 
+# dens( as.numeric(H[1,]) , adj=0.1 )
+
+entropies <- as.numeric(H[1,])
+distributions <- H[2,]
+```
+
+```{r}
+max(entropies)
+round(distributions[which.max(entropies)][[1]],3)
+```
+
+Similar to the binomial we calculated:
+```{r}
+A
+```
+
+Conceptual lessons
+
+- Max entropy of binomial - When only two unordered outcomes are possible, the expected numbers of each type of events are assumed to be constant, then the distribution that is most consistent with these constraints is the binomial distribution. 
+- We don't know the expected value but wish to estimate it. If only 2 un-ordered outcomes are possible and process generating them is invariant with time (expected value is constant at each combo of predictor values), then the most conservative distribution is the binomial
+- Entropy maximisation is really just counting given the assumptions
+
+
+## Generalised Linear models
+
+We have used Gaussian models until now, where we assumed outcome variable follows a Gaussian distribution, with its mean a linear model. For outcome variables that are continuous and far from any theoretical max or min, Gaussian model has the max entropy. 
+
+However, when outcome variable is either discrete or bounded, Gaussian is not ideal. In such cases we can replace the gaussian with some better alternative for the situation and make necessary changes to the linear model so that it models some parameter of this new distribution. For example, for the case of counts:
+
+$$
+\begin{align}
+y_i &\sim Binomial(n, p_i) \\
+f(p_i) &= \alpha + \beta (x_i - \bar x)
+\end{align}
+$$
+Changes from our usual model here:
+
+- Likelihood is Binomial vs Gaussian (since for a count outcome y for which each obs arises from n trials and wiht constant expected value $np$, the binomial dist has the max entropy and is thus the least informative distribution that satisfies our prior knowledge of the outcomes y)
+- a function $f$, the link function to be determined separately from the distribution. For the binomial case we have parameters $n$ and $p$. $n$ is usually known (but not always), so it is common to attach a linear model to the unknown part $p$. This is a prob mass and must therefore lie between 0 and 1. Link function solves this problem. 
+
+### Exponential Family
+
+Every member of this family a max entropy distribution for some set of constraints. 
+
+**Exponential distribution** is constrained to be zero or positive. It is a dist of distance/duration, measurements that represent displacement from some point of reference (in time or space). If the prob of an event is constant in time or across space, then the dist of events tends towards exponential. It has the max entropy among all non-negative continuous distributions with the same average displacement. 
+
+Its shape is described by single parameter $\lambda$, or the avg displacement $\lambda^{-1}$. 
+
+**Gamma Distribution** - also constrained to be >= 0. Unlike exponential it can have a peak above zero. If an event can only happen after 2 or more exp distributed events happen, the resulting waiting times will be gamma distributed. 
+
+Has highest entropy among distributions with the same mean and same average logarithm. Shape is described by 2 params. 
+
+**Poisson Distribution** - a count distribution like binomial. Mathematically a special case of binomial, when $n$ is very large and $p$ is very small. Parameter $\lambda=np$. It is used for counts that never get close to any theoretical maximum. Described only by $\lambda$, the rate of events. 
+
+
+### Linking linear models to distributions
+
+To build a regression model from any of the exp family distributions involves creating linear model(s) and attaching them to the parameter(s) of the distribution that describe its shape. A link function is often required for this. A link function's job is to map the linear space of a model onto the non-linear space of the paramater. Two common links are **logit link** and **log link**. 
+
+**Logit Link** is for mapping a parameter that is defined as a probability mass (thus, must lie between 0 and 1). 
+
+$$
+\begin{align}
+
+\operatorname{logit}(p_i) &= \log \frac{p_i}{1 - p_i} \tag{Log-Odds}   \\
+\log \frac{p_i}{1 - p_i} &=\alpha + \beta x_i  \\
+\text{Arranging terms we get} \implies \\
+p_i &= \frac{\exp (\alpha + \beta x_i)}{1 + \exp (\alpha + \beta x_i)}
+
+\end{align}
+
+$$
+
+Above function is called **logistic**. Also the **Inverse Logit**, since it inverts the logit transform. When we use a logit transform, we are defining the distribution's parameter value to be the logistic transform of the linear model. 
+
+```{r}
+x <- seq(-3, 3, length.out = 100)
+log_odds <- 2 * x
+p <- exp(log_odds) / (1 + exp(log_odds))
+
+withr::with_par(
+  list(mfrow = c(1, 2)), 
+  code = {
+    plot(x, log_odds, type = "l", ylab = "log-odds", col = 'navyblue')
+    
+    plot(x, p, type = "l", ylab = "probability", col = 'navyblue')
+    abline(h = c(0, 1), lty = 2)
+    
+  }
+)
+```
+
+This affects interpretation, since a unit change in predictor does not correspond with a constant change in the mean of the outcome variable. (Comparing to interaction terms, every parameter sort of interacts with itself now, becuase the impact of a change in a prector depends upon the value of the predictor before change). 
+
+Second common link is **LOG LINK**, which maps a parameter defined only over positive real values onto a linear model. For instance sd of a Gaussian distribution can only be positive (neither negative or zero). 
+
+$$
+\begin{align}
+y_i &\sim Normal(\mu, \sigma_i) \\
+\log (\sigma_i) &= \alpha + \beta x_i \\
+
+\text{This implies that} \\
+\sigma_i &= exp(\alpha + \beta x_i) 
+\end{align}
+$$
+Thus, log link assumes parameter's value is the exp of the linear model, and impolies exponential scaling of the outcome with the predictor variable. 
+
+```{r}
+x <- seq(-2, 2, length.out = 100)
+y <- 2 * x
+ly <- exp(y)
+
+withr::with_par(
+  list(mfrow = c(1, 2)), 
+  code = {
+    plot(x, y, type = "l", ylab = "log measurement", col = 'navyblue')
+    
+    plot(x, ly, type = "l", ylab = "original measurement", col = 'navyblue')
+    
+  }
+)
+```
+
+
+
+
+
+

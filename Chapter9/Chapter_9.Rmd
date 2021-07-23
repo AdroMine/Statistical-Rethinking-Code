@@ -393,7 +393,7 @@ precis(m9.2)
 ```
 
 alpha should have been close to zero. We get crazy values however, and implausibly large intervals. Even sigma is too big. 
-`n_eff` and `Rhat` diagnositcs don't look good either. We drew 1500 samples in total (3 chains), but effective size iis very less. 
+`n_eff` and `Rhat` diagnositcs don't look good either. We drew 1500 samples in total (3 chains), but effective size is very less. 
 
 The warning about **divergent transitions after warmup** tells there are problems with the chains. 
 

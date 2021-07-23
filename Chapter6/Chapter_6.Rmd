@@ -534,7 +534,7 @@ d2$A <- (d2$age - 18) / (65 - 18)
 
 Happiness is on arbitrary scale ranging from -2 to +2.
 
-Our imaginary max $\beta_A$ will take H from +2 to -2 with A going from 0 to 1 (18 to 65). This slow will be :
+Our imaginary max $\beta_A$ will take H from +2 to -2 with A going from 0 to 1 (18 to 65). This slope will be :
 
 (2 - (-2)) / 1 = 4. Since 95% of mass of normal dist is contained within 2 std, we can set sd of prior to be half of 4 = 2.
 
@@ -671,7 +671,7 @@ Confouding is any context in which the association between an outcome Y and a pr
 
 Blocking confounding paths between some predictor X and some outcome Y is known as shutting the BACKDOOR. 
 
-> Given a causal DAG, it is always possible to say which, if any, variables one must control for in orer to hsut all the backddor paths. It is also possible to say which variables one must contorl fo rin order to hsut all the backdoor paths. It is also possible to say which variables one must _one_ must not control for in order ot avoid making new confounds. 
+> Given a causal DAG, it is always possible to say which, if any, variables one must control for in orer to hsut all the backddor paths. It is also possible to say which variables one must control for in order to shut all the backdoor paths. It is also possible to say which variables _one_ must not control for in order ot avoid making new confounds. 
 
 #### Four types of relations
 
@@ -716,7 +716,9 @@ ggdag(descendant) + theme_void()
 ```
 
 
-All DAGs built out of these four types of relations. Here's the recipe to determine which to include and exclude:
+## Determine which vars to include/exclude
+
+All DAGs are built out of these four types of relations. Here's the recipe to determine which to include and exclude:
 
 1. List all of the paths connecting X (the potential cause of interest) and Y (the outcome).
 2. Classify each path by whether it is open or closed. A path is open unless it contains a collider.

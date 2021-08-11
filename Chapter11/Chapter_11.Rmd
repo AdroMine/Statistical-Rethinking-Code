@@ -1008,7 +1008,7 @@ The model allows this because intercept can be a free parameter (can take any va
 
 A scientific model would say that tools develop over time and not at once. Innovation adds them and innovation is proportional to population but with diminishing returns. Processes of loss removes the tools and this will be proportional to the number of tools without diminishing returns. These forces balance out to produce a tool kit of some size. 
 
-Thus we can write that teh change in the expected no of tools in one time step is:
+Thus we can write that the change in the expected no of tools in one time step is:
 
 $$
 \Delta T=\alpha P^\beta - \gamma T

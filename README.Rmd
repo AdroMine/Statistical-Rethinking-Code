@@ -34,16 +34,21 @@ directory <- data.frame(Chapters = chapters,
 for(i in seq_along(chapters)){
      files <- list.files(chapters[i], include.dirs = FALSE, full.names = TRUE)
      
+     # search for Chapter_##_.html (main chapter note + models)
      if(any(grepl("Chapter_\\d+\\.html$", files,ignore.case = TRUE))){
+       # if any such file found, find it and attach beginning html
        note <- grep("Chapter_\\d+\\.html$", files, value = TRUE, ignore.case = TRUE)
        note <- glue("https://adromine.github.io/Statistical-Rethinking-Code/{note}")
      } else {
+       # else there's probably a .R file (for the beginning chapters)
        note <- grep("Chapter_\\d+\\.R$", files, value = TRUE)
      }
      
      directory[i, 2] <- glue("[link]({note})")
      html <- grep("Chapter_\\d+_EoC\\.html", files, value = TRUE, ignore.case = TRUE)
-     directory[i, 3] <- glue("[link](https://adromine.github.io/Statistical-Rethinking-Code/{html})")
+     if(length(html) > 0)
+       directory[i, 3] <- glue("[link](https://adromine.github.io/Statistical-Rethinking-Code/{html})")
+     else directory[i, 3] <- "WIP"
 }
 
 directory$Chapters <- str_replace(directory$Chapters, "Chapter", "Chapter ")

@@ -1,0 +1,977 @@
+---
+title: "Statistical Rethinking Chapter 12"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error =FALSE)
+library(rstan)
+rstan_options(auto_write = TRUE)
+Sys.setlocale(locale = "Chinese")
+```
+
+Chapter is about mixtures - specifailly about constructing likelihoods and link functions by piecing together simpler components. 
+
+Three common and useful examples will be considered:
+
+1. **OVER-DISPERSION** - extend binomial and Poisson models to cope with unmeasured sources of variation
+2. **ZERO-INFLATED & ZERO-AUGMENTED** - mix binary event with an ordinary GLM likelihood like a Poisson/Binomial
+3. **ORDERED-CATEGORICAL** - for ordinal variables. This model is built by merging a categorical likelihood function with a special kind of link function, usually a cumulative link. 
+
+
+# Over-dispersed counts
+
+Models based on normal distributions are sensitive to extreme observations since they assume thin tails. Using a student-t distribution allows fatter tails. Fatter tails are required since often underlying processes are variable mixtures. The same is true for count models, and there can be fatter tails there too.
+
+When counts are more variable than a pure process, they exhibit **Over-Dispersion**. (Variance of a variable is often called **Dispersion**). The variance of a binomial is $Np(1-p)$. When observed variance exceeds this amount, it implies some omitted variable is producing additional dispersion in the observed counts. 
+
+Over-dispersion can cause the same problems as ignoring predictor variables -- counfounding, spurious inferences, etc. Best solution is to find the omitted source of dispersion, but even if no additional variables are available, there are tow common and useful strategies. 
+
+We will see **CONTINOUS MIXTURES** models, in which a linear model is attached, not to the observations, but rather to a distribution of observations. beta-binomial and gamma-Poisson (negative binomial) will be used. 
+
+## Beta-Binomial 
+
+> A **Beta-Binomial** is a mixture of binomial distributions and assumes each binomial count observation has its own probability of success.
+
+We therefore estimate the distribution of __probabilities__ of success instead of a single probability of success. Any predictor variable describe the shape of this distribution. 
+
+We will study this using the UCBadmit dataset by ignoring the department and then seeing how a beta-binomial model picks up on the variation that arises from the omitted variable department. 
+
+A beta-binomial model of this data will assume that each observed count on each row the data talbe has its own unique, unobserved probability distribution. This distribution is described using aeta distribution, which is a probability distribution for probabilities. 
+
+A beta distribution has two params, an average probability $\bar p$ and a shape param $\theta$. The shape param describes how spread out teh distribution is. 
+
+- When $\theta=2$, every probability from 0 to 1 is equally likely.
+- As $\theta$ increases above 2, distribution of probabilities grows more concentrated. 
+- When $\theta<2$, distribution is so dispersed that extreme probs near zero and 1 are more likely than the mean. 
+
+```{r}
+# library(manipulate)
+library(rethinking)
+pbar <- 0.5
+theta <- 5
+
+# manipulate(
+#     curve(dbeta2(x, pbar, theta), from = 0, to = 1, xlab = "probability", ylab = "Density"), 
+#     theta = slider(0, 10, initial = 2, step = 0.1), 
+#     pbar = slider(0, 1, initial = 0.5, step = 0.1))
+```
+
+We will bind our lienar model to $\bar p$, so that changes in predictor variables change the central tendency of the distribution. The model is thus:
+
+$$
+\begin{align}
+A_i &\sim \operatorname{BetaBinomial}(N_i, \bar p_i, \theta) \\
+\operatorname{logit} (\bar p_i) &= \alpha_{GID[i]} \\
+\alpha_j &\sim \operatorname{Normal}(0, 1.5) \\
+\theta &= \phi + 2 \\
+\phi &\sim \operatorname{Exponential} (1)
+\end{align}
+$$
+
+where 
+
+- __A__ is `admit`
+- __N__ is `applications`
+- __GID[i]__ is gender index, 1 for male, 2 for female
+
+Theta is defined in a way such the minimum value for it is 2, i.e., it is flat. 
+
+Fitting this model:
+```{r results='hide'}
+library(rethinking)
+data("UCBadmit")
+d <- UCBadmit
+d$gid <- ifelse(d$applicant.gender == "male", 1L, 2L)
+dat <- list(A = d$admit, N = d$applications, gid = d$gid)
+m12.1 <- ulam(
+    alist(
+        A ~ dbetabinom(N, pbar, theta), 
+        logit(pbar) <- a[gid], 
+        a[gid] ~ dnorm(0, 1.5), 
+        
+        # tagging as transpars (transformed parameters), stan will return it in samples
+        transpars> theta <<- phi + 2.0,  
+        
+        phi ~ dexp(1)
+    ), data = dat, chains = 4, cmdstan = TRUE 
+    # setting cmdstan = TRUE, since this doesn't work with rstan/stanheaders 2.21
+)
+```
+
+Looking at the posterior means:
+```{r}
+post <- extract.samples(m12.1)
+post$da <- post$a[,1] - post$a[,2]
+precis(post, depth = 2)
+```
+
+a[1], the log odds of admission for male applicants is lower than than the log-odds of female applicants, a[2], however, the difference between the two, `da` calculated above is uncertain, thus we don't have evidence of gender based difference in admission rates. Unlike the model from previous chapters, this model is not confounded by the lack of `department`. This is because the beta-binomial allows each row in the data to have its own unobserved intercept, which are sampled from a beta distribution with mean $\bar p_i$ and dispersion $\theta$. We can see how this beta distribution looks like:
+
+```{r}
+gid <- 2
+
+# draw posterior mean beta distribution
+curve(dbeta2(x, mean(logistic(post$a[,gid])), mean(post$theta)), from = 0, to = 1, 
+      ylab = "Density", xlab = "probability admit", 
+      ylim = c(0, 3), lwd = 2)
+
+# draw 50 beta distributions sampled from posterior
+for(i in 1:50){
+    p <- logistic(post$a[i,gid])
+    theta <- post$theta[i]
+    curve(dbeta2(x, p, theta), add = TRUE, col = col.alpha('black', 0.2))
+}
+mtext("distribution of female admission rates")
+```
+
+The plot above shows 50 combinations of $\bar p$ and $\theta$ sampled from the posterior. Overall the admission rate is low, however the posterior samples allow for departments that admit most applicants. The model is no longer tricked by dept variation into making a false inference about gender. 
+
+
+
+Posterior Validation Check:
+
+```{r}
+postcheck(m12.1)
+```
+
+- The vertical axis has the predicted proportion admitted for each case on the horizontal. 
+- The blue circles are the actual observed proportions for row of the data. 
+- Open circles are the posterior mean $\bar p$ with 89% percentile interval. 
+- the + symbols mark the 89% interval of predicted counts of admission
+
+There is a lot of dispersion here, there is heterogeneity across rows, the beta distribution estimates and anticipates it. 
+
+
+## Negative-binomial or gamma-Poisson
+
+A negative-binomial or gamma-Poisson assumes that each Poisson count observation has its own rate. It estimates the shape of a gamma distribution to describe the Poisson rates across cases. Predictors adjust the shape of this distribution and not the expected value of each obs. 
+
+The Gamma-Poisson dist has 2 parameters: one for the mean (rate) and one for the dispersion (scale). 
+
+$$
+y_i \sim \operatorname{Gamma-Poisson}(\lambda_i, \phi)
+$$
+
+where $\lambda$ can be treated as the rate, and $\phi$ controls the variance and must be positive. The variance of the gamma-Poisson is $\lambda + \lambda^2/\phi$. Thus large values of $\phi$ make the distribution similar to a pure Poisson process. 
+
+We will use the Oceanic tool example, where Hawaii was a very influential point, but will be less influential under this model, since gamma-Poisson expects more variation around the mean rate. 
+
+Repeating the model equation from chapter 11:
+
+$$
+\begin{align}
+T_i &\sim \operatorname{Poisson}(\lambda_i) \\
+\lambda_i &= \alpha P_i^\beta / \gamma  \\
+\text{Or can be represented as:} \\
+\log (\lambda_i) &= \alpha + \beta \log P_i - \gamma
+\end{align}
+$$
+where __P__ is population size, __T__ is the number of tools, and $\alpha$, $\beta$, $\gamma$ are parameters to be estimated. We assume that Number of tools increase with Population (beta) and also decrease naturally (gamma). 
+
+```{r results='hide'}
+library(rethinking)
+data(Kline)
+d <- Kline
+d$P <- standardize(log(d$population)) # this is not used
+d$contact_id <- ifelse(d$contact == "high", 2L, 1L)
+
+dat2 <- list(
+    T = d$total_tools, 
+    P = d$population, 
+    cid = d$contact_id
+)
+
+m12.2 <- ulam(
+    alist(
+        T ~ dgampois(lambda, phi), 
+        lambda <- exp(a[cid]) * P^b[cid] / g, 
+        a[cid] ~ dnorm(1,1), 
+        b[cid] ~ dexp(1), 
+        g      ~ dexp(1), 
+        phi    ~ dexp(1)
+    ), data = dat2, chains = 4, log_lik = TRUE,
+)
+
+# repeating model from previous chapter
+m11.11 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        lambda <- exp(a[cid]) * P^b[cid] / g, 
+        a[cid] ~ dnorm(1, 1), 
+        b[cid] ~ dexp(1), 
+        g ~ dexp(1)
+    ), data = dat2, chains = 4, log_lik = TRUE
+)
+```
+
+Plotting the posterior predictions for old and new model:
+
+```{r fig.width=9, fig.height=7}
+library(dplyr)
+library(scales)
+library(patchwork)
+
+k1 <- PSIS(m11.11, pointwise = TRUE)$k
+k2 <- PSIS(m12.2, pointwise = TRUE)$k
+
+# function to convert values to real scale
+P_scale <- attributes(d$P)$'scaled:scale'
+P_center <- attributes(d$P)$'scaled:center'
+real_scale <- function(x) exp(x * P_scale + P_center)
+
+# sequence of Population values
+ns <- 100
+P_seq <- seq(from = -1.4, to = 3, length.out = ns)
+P_seq2 <- real_scale(P_seq)
+
+# get mean and CI for total tools from model
+get_mu_ci <- function(model, cid){
+    mu <- link(model, data = data.frame(P = P_seq2, cid = cid))
+    lmu <- colMeans(mu)
+    ci <- apply(mu, 2, PI)
+    tibble(P = P_seq2, mu = lmu, min = ci[1,], max = ci[2,], Contact = cid)
+}
+    
+plot_posterior <- function(model, model_name, k){
+    
+    bind_rows(get_mu_ci(model, 1), get_mu_ci(model, 2)) %>% 
+        mutate(contact = factor(Contact, labels = c("Low", "High"))) %>% 
+        
+        # plotting
+        ggplot(aes(x = P, y = mu)) + 
+        
+        # posterior mean line
+        geom_line(aes(linetype = contact), show.legend = TRUE) + 
+        
+        # posterior CI
+        geom_ribbon(aes(ymin = min, ymax = max, fill = contact), alpha = 0.2) + 
+        
+        # plot real points
+        geom_point(aes(population, total_tools),  data = Kline,
+                   colour = '#1E59AE', shape = ifelse(Kline$contact == "low", 1, 16), 
+                   size = k/max(k) * 4,
+                   show.legend = FALSE) + 
+        
+        # formatting
+        labs(x = "population", y = "total tools", 
+             title = model_name) +
+        guides(size = FALSE) + 
+        scale_x_continuous(labels = comma) +
+        coord_cartesian(ylim = c(0, 70), xlim = c(0, 2.7e5))
+        
+    
+}
+p1 <- plot_posterior(m11.11, "pure Poisson Model", k1)
+p2 <- plot_posterior(m12.2, "gamma-Poisson model", k2)
+p1 + p2
+```
+
+The pure Poisson model's posterior and the posterior for gamma-Poisson are plotted above. The former is much ore influenced by Hawaii, whereas in the gamma-Poisson, the influence is a lot less. 
+
+Also the CI for High contact is much wider and it is difficult to reliably distinguish between the two, thus the influence of contact rate has diminished greatly. 
+
+
+## Over-dispersion, entropy and information criteria
+
+beta-binomial and gamma-poisson are the max entropy for the same constraints as the regular binomial and Poisson. They just try to account for unobserved heterogeneity in probabilities and rate. 
+
+In terms of model comparison they are similar to binomial and poisson respectively. 
+
+WAIC/PSIS should not be used with these models. Ordinary binomial and poisson can be aggregated/disaggretated across rows in the data without changing any causal assumptions, however, for beta-binomial and gamma-Poisson, a unobserved parameter is applied to each row in the data, thus the data structure determines how the extra variation enters the model. 
+
+# Zero-Inflated outcomes
+
+Often, things we measure are mixtures of multiple processes. In such cases a **Mixture Model** is useful, which uses more than one single probability distribution (use more than one likelihood for the same outcome variable) to model a mixture of causes.
+
+Count variables often require this treatment, since count of zero can arise in multiple ways - rate of events was low or because the generating process failed to start. 
+
+## Zero-inflated Poisson
+
+Using the monk example from chapter 11, (monks write down manuscripts) where monks finish copying a small number of manuscripts. It was a Poisson process. Let us extend the example and have the extra condition that monks take breaks on some days. The monastery owner would like to know how often the breaks are taken. The obstacle is that even on some working days no manuscripts are produced (the rate is low). 
+
+We will use a mixture model to solve this. A zero can thus arise from two processes: 
+
+1. Monks took a break (probability __p__)
+2. Monks worked, but did not complete any manuscript (let $\lambda$ be the mean number of manuscripts completed)
+
+The likelihood of observing a zero is:
+
+$$
+\begin{align}
+Pr(0| p, \lambda) &= Pr(\operatorname{break}|p) + Pr(\operatorname{work}|p) \times Pr(0|\lambda) \\
+&= p + (1-p) \exp(-\lambda)
+\end{align}
+$$
+(Poisson likelihood is $Pr(y|\lambda) = \lambda^y \exp(-\lambda)/y!$, so ($Pr(0|\lambda)= \exp(-\lambda)$))
+
+The likelihood of a non-zero value __y__ is:
+
+$$
+\begin{align}
+Pr(y|y>0, p, \lambda) &= Pr(\operatorname{break}|p)(0) + Pr(\operatorname{work}|p)Pr(y|\lambda) \\[5pt]
+&= (1-p) \frac{\lambda^y \exp(-\lambda)}{y!}
+\end{align}
+$$
+
+We will define the above as `ZIPoisson` that takes two params __p__(probability of zero) and $\lambda$ (mean of Poisson) to describe its shape. Then the zero-inflated Poisson regression takes the following mathematical form:
+
+$$
+\begin{align}
+y_i &\sim \operatorname{ZIPoisson}(p_i, \lambda_i) \\
+\operatorname{logit}(p_i) &= \alpha_p + \beta_p x_i \\
+\log(\lambda_i) &= \alpha_\lambda + \beta_\lambda x_i
+\end{align}
+$$
+
+There are two linear models and two links, one for each process in ZIPoisson. The parameters of the two linear models differ since __x__ may be associated differently with each part of the mixture. We could even use different predictors for the two linear models above. 
+
+Let's simulate some data next:
+
+```{r}
+# define parameters
+
+prob_break <- 0.2 # 20% of days
+rate_work  <- 1   # average 1 manuscript per day
+
+# sample one year of production
+N <- 365
+
+# simulate days monks take break
+set.seed(365)
+work_break <- rbinom(N, 1, prob_break)
+
+# simulate mansucripts completed
+y <- (1 - work_break) * rpois(N, rate_work)
+```
+
+
+The outcome variable we observe will be `y`, which is the list of counts of completed manuscripts, one count for each day of the year. Let's look at the outcome variable
+
+```{r}
+library(rethinking)
+simplehist(y, xlab = "manuscripts completed", lwd = 4)
+
+zeros_break <- sum(work_break)
+zeros_work  <- sum(y == 0 & work_break == 0)
+zeros_total <- sum(y == 0)
+
+lines( c(0, 0), c(zeros_work, zeros_total), lwd = 4, col = rangi2)
+```
+
+The zeros produced due to breaks are in blue. Those from work are in black. The total number of zeros is inflated compared to a typical Poisson distribution. 
+
+In `rethinking` zero-inflated Poisson likelihood is provided via the `dzipois` function. We will also use a prior to nudge the probability of taking breaks to less than 0.5 (less breaks than work). 
+
+```{r}
+m12.3 <- ulam(
+    alist(
+        y ~ dzipois(p, lambda), 
+        logit(p) <- ap, 
+        log(lambda) <- al, 
+        ap ~ dnorm(-1.5, 1), 
+        al ~ dnorm(1, 0.5)
+    ), data = list(y = y), chains = 4, refresh = 0
+)
+precis(m12.3)
+```
+
+On the natural scale these posterior means are:
+
+```{r}
+post <- extract.samples(m12.3)
+mean(inv_logit(post$ap))    # probability break
+mean(exp(post$al))          # rate manuscripts finished when working
+```
+
+
+We get our original numbers back. 
+
+### Overthiking: Zero-Inflated Poisson calculations in Stan
+
+When we use `dzipois`, it tells `ulam` to construct something of the following form:
+
+```{r}
+m12.3_alt <- ulam(
+    alist(
+        y|y>0  ~ custom(log1m(p) + poisson_lpmf(y|lambda)), 
+        y|y==0 ~ custom(log_mix(p, 0, poisson_lpmf(0|lambda))), 
+        logit(p) <- ap, 
+        log(lambda) <- al, 
+        ap ~ dnorm(-1.5, 1), 
+        al ~ dnorm(1, 0.5)
+    ), data = list(y = as.integer(y)), chains = 4, refresh = 0
+)
+```
+
+This is the same model as `m12.3` but with explicit mixtures and raw stan code within the `custom` lines. 
+
+If we look at the stancode, we will see corresponding lines:
+
+```{r echo=FALSE}
+code <- stancode(m12.3_alt)
+code <- strsplit(code, "\n")[[1]]
+cat( paste( tail(code, 6) , collapse = "\n") )
+```
+
+The `target` variable is a chain of terms for calculating the log-posterior. We add the results of each value of `y` to the stack. Stan will later then use this to figure out the gradient (calculus chain rule). 
+
+`log1m` computes the log of one-minus a value and is safe when the value is close to one (so that log(0) doesn't give us -Inf). 
+
+`log_mix` mixes together two log probabilities (prob break + prob zero manuscript while working) but avoid rounding error. 
+
+For our example, it is equivalent to:
+
+`if (y[i] == 0) target += log(p + (1-p)*exp(-lambda));`
+
+but more stable under extreme values of __p__. 
+
+`y` was coerced to integer in the data list. When we use custom distributions, we need to state the data types. 
+
+
+# Ordered Categorical Outcome
+
+This is for the case when the outcome variable is ordinal, i.e. it is categorical but the categories have some preset order. But the numerical difference between any two categories may not be equal. 
+
+This is similar to multinomial prediction, but with the constraint that for any associated predictor, any increase should move predictions progressively through the categories in sequence. The conventional solution for this problem is to use a cumulative link function (that uses cumulative probabilities, P(x<=k)). 
+
+The following two sections will deal with:
+
+- how to parameterize a distribution of outcomes on the scale of log-cumulative-odds
+- introduce predictor(s) to these log-cumulative-odds values
+
+## Example: Moral Intuition {#morality_principles}    
+
+We will be discussing the classic trolley car example here. But first, three important principles of unconscious reasoning (derived from research) that may explain variations in judgement:
+
+1. **Action Principle**: Harm caused by action is morally worse than equivalent harm caused by omission
+2. **Intention Principle**: Harm intended as the means to a goal is morally worse than equivalent harm foreseen as the side effect of a goal
+3. **Contact Principle**: Using physical contact to cause harm to a victim is morally worse than causing equivalent harm to a victim without using physical contact
+
+The example is based on the classic trolley car dilemma, whether to let 5 people be hit by the trolley or 1. It has the action principle. We will construct a version with the Intention priciple as well. In this example, pulling the lever makes one person fall on the rail track and the train slows down enough due to hitting this person that the 5 people are able to make escape. So we have both action + intention. 
+
+```{r}
+library(rethinking)
+data(Trolley)
+d <- Trolley
+```
+
+The data contains 12 columns and 9930 rows, comprising data for 331 unique individuals. We are interested in the `response` variable which is an integer from 1 to 7 indicating how morally permissible the participant found the action to be taken (or not) in the story. 
+
+### Describing an ordered distribution with intercepts
+
+Histogram of the outcome variable:
+
+```{r}
+simplehist(d$response, xlim = c(1, 7), xlab = "response")
+```
+
+Goal: re-describe this histogram on the log-cumulative-odds scale. This implies constructing the odds of a cumulative probability and then taking log. This is done since this is the cumulative analog of the logit link. The logit is log-odds and cumulative logit is log-cumulative-odds. Both are designed to constrain the probs to 0-1 interval. 
+
+First let us calculate cumulative probabilities:
+```{r}
+# discrete proportion of each response value
+pr_k <- table(d$response) / nrow(d)
+
+# cumsum converts to cumulative proportions
+cum_pr_k <- cumsum(pr_k)
+
+# plot
+plot(1:7, cum_pr_k, type = "b", xlab = 'response',
+     ylab = 'cumulative proportion', ylim = c(0,1))
+```
+
+Now to re-describe the histogram as log-cumulative-odds, we require a series of intercept parameters, where each intercept with be on the log-cumulative-odds scale and stand in for the cumulative probability of each outcome. 
+
+The log-cumulative-odds that a response value $y_i$ is equal to or less than some possible outcome __k__ is:
+
+$$
+\log \frac{Pr(y_i \le k)}{1 - Pr(y_i \le k)} = \alpha_k
+$$
+
+where $\alpha_k$ is an intercept unique to each possible outcome value __k__. 
+
+```{r results='hold'}
+logit <- function(x) log(x / (1-x)) 
+round(lco <- logit(cum_pr_k), 2)
+plot(1:7, lco, xlab = 'response', ylab = "log-cumulative-odds")
+```
+
+The last value is Inf, since the largest response value always has a cumulative prob of 1. Thus we don't really need a parameter for the last value and effectivly only need $K-1$ intercepts. 
+
+We want to get the posterior distribution for these intercepts, which will allow us to take into account sample size and prior info as well as insert predictor variables. For that we need likelihood of each response value $Pr(y_i = k)$
+
+We can get these by subtracting two adjacent cumulative probs(which we can get from odds via inverse link). 
+
+$$
+p_k = Pr(y_i = k) = Pr(y_i \le k) - Pr(y_i \le k-1)
+$$
+Reproducing Figure 12.5
+```{r}
+plot(1:7, cum_pr_k, type = "b", 
+     xlab = 'response', ylab = 'cumulative proportion', 
+     ylim = c(0,1), xlim = c(1, 7.2), pch = 1, cex = 1.5)
+for(i in 1:7){
+    k <- i + 0.1
+    y1 <- if(i == 1) 0 else cum_pr_k[i-1]
+    y2 <- cum_pr_k[i]
+    lines(c(i, i), c(0, y2), lwd = 4, col = 'grey')
+    lines(c(k, k), c(y1, y2), lwd = 4, col = "royalblue3")
+    text(x = i + 0.3, y = y2 - 0.04, labels = as.character(i), col = 'royalblue2')
+}
+```
+
+The convention used to write the mathematical form for the ordered logit is:
+
+$$
+\begin{align}
+R_i &\sim \operatorname{Ordered-logit}(\phi_i, \kappa) & \text{[probability of data]} \\
+\phi_i &= 0 & \text{[linear model]} \\
+\kappa_k &\sim \operatorname{Normal}(0, 1.5) & \text{[common prior for each intercept]}
+\end{align}
+$$
+
+This can also be expressed in a more detailed manner by starting with a categorical distribution:
+
+$$
+\begin{align}
+R_i &\sim \text{Categorical}(p)         & \text{[probability of data]} \\
+p_1 &= q_1                              & \text{[probabilities of each value k]} \\
+p_k &= q_k - q_{k-1} \quad \text{for } K > k > 1 \\
+p_K &= 1 - q_{k-1} \\
+\text{logit}(q_k) &= \kappa_k - \phi_i  & \text{[cumulative logit link]} \\
+\phi_i &= \text{terms of linear model}  & \text{[linear model]} \\
+\kappa_k &\sim \text{Normal}(0, 1.5)    & \text{[common prior for each element]}
+\end{align}
+$$
+
+This form shows that the ordered-logit distribution is essentially a categorical distribution that takes K-1 sized vector of probabilities, where each value is defined by its link to an intercept parameter $\alpha_k$. 
+
+The priors above are weakly regularising. For cases with much less data, more consideration needs to be paid to the priors (considerations that $\alpha_1 < \alpha_2$ for instance). 
+
+`quap` and `ulam` perform this in the following manner:
+
+```{r results='hide'}
+m12.4 <- ulam(
+    alist(
+        R ~ dordlogit(0, cutpoints), 
+        cutpoints ~ dnorm(0, 1.5)
+    ), data = list(R = d$response), chains = 4, cores = 4
+)
+```
+
+The zero in the `dorglogit` is a placeholder for the linear model to be constructed later. For doing this in `quap`, we need to specify the `start` values for the cutpoints, otherwise it'll have a hard time starting. Instead of the exact values, it is the order of these start values that is important. 
+
+```{r}
+m12.4q <- quap(
+    alist(
+        response ~ dordlogit(0, c(a1, a2, a3, a4, a5, a6)), 
+        c(a2, a2, a3, a4, a5, a6) ~ dnorm(0, 1.5)
+    ), data = d, start = list(a1 = -2, 
+                              a2 = -1, 
+                              a3 = 0, 
+                              a4 = 1, 
+                              a5 = 2, 
+                              a6 = 2.5)
+)
+```
+
+The posterior distribution of the cutpoints is on the log-cumulative-odds scale:
+
+```{r}
+precis(m12.4, depth = 2)
+```
+
+Due to the large size of the data, the posterior for each intercept is estimated precisely (pay attention to the small sd)
+
+To get cumulative probabilities back:
+
+```{r}
+round(inv_logit(coef(m12.4)), 3)
+```
+
+These are the same as computed before on the dataset, but now we have a posterior distribution which provides a sense of uncertainty around them. 
+
+### Adding predictor variables
+
+To include predictors, we define the log-cumulative-odds of each response __k__ as a sum of its intercept $\alpha_k$ and a typical linear model. The linear model will be defined as $\phi_i=\beta x_i$. Then each cumulative logit becomes:
+
+$$
+\begin{align}
+\log \frac{Pr(y_i \le k)}{1 - Pr(y_i \le k)} &= \alpha_k - \phi_i \\
+\phi_i &= \beta x_i \\
+
+\text{the first line can also be written as:} \\
+\log \frac{Pr(y_i \le k)}{Pr(y_i > k)} &= \alpha_k - \phi_i \\
+\end{align}
+$$
+
+This form ensures the correct ordering of the outcome values, while still morphing the likelihood of each individual value as the predictor $x_i$ changes values. The linear model is subtracted from the intercept since we want positive values of $\beta$ to imply increasing __x__ also increases mean __y__. Adding to the intercept would lead to the inverse interpretation. This is because decreasing the log-cumulative-odds of every outcome value __k__ below the max shifts probability mass upwards towards higher outcome values (read the last line of above equation). 
+
+As example, suppose we take the posterior means from `m12.4` and subtract 0.5 from each and calculate the average outcome value. 
+
+```{r}
+round( pk <- dordlogit(1:7, 0, coef(m12.4)), 2)
+```
+
+These imply average outcome value of:
+
+```{r}
+sum(pk * (1:7))
+```
+
+Now subtracting 0.5 from each:
+
+```{r}
+round( pk <- dordlogit(1:7, 0, coef(m12.4) - 0.5), 2)
+```
+
+The probability mass has shifted from lower to higher values. 
+
+Expected value now is:
+
+```{r}
+sum(pk * (1:7))
+```
+
+> Trolley Problem 
+
+We will now use predictor variables to help explain variation in responses. The predictors of interest are `action`, `intention` and `contact`, each an indicator variable corresponding to each principle mentioned [earlier](#morality_principles).  
+
+Consider that contact always implies action. Each can be combined with intention, to give us the following 6 possible story combinations:
+
+1. No action, contact, or intention
+2. Action
+3. Contact
+4. Intention
+5. Action and intention
+6. Contact and intention
+
+The last two represent interactions: the influence of intention may depend upon the presence of action/contact. 
+
+`Contact` is coded here in such a way that it excludes `action`, treating the two features as mutually exclusive.
+
+```{r}
+unique(d[, c("action", "intention", "contact")]) # same 6 combinations in data
+```
+
+We will be using indicator variables this time (instead of index variable approach). 
+
+Thus, the log-cumulative-odds of each response __k__ will now be:
+
+$$
+\begin{align}
+\log \frac{Pr(y_i \le k)}{1 - Pr(y_i \le k)} &= \alpha_k - \phi_i \\
+\phi_i &= \beta_A A_i + \beta_C C_i + B_{I,i}I_i \\
+B_{I,i} &= \beta_I + \beta_{IA}A_i + \beta_{IC} C_i
+\end{align}
+$$
+
+where:
+
+- $A_i$ - indicates value of `action` on row __i__, 
+- $I_i$ - indicates value of `intention` on row __i__, 
+- $C_i$ - indicates value of `contact` on row __i__, 
+- $B_I$ - is an accessory linear model for the interaction of action/contact with intention. This could be substituted directly into the equation for $\phi_i$ without changing anything
+
+Fitting the model:
+
+```{r results='hide'}
+dat <- list(R = d$response, 
+            A = d$action, 
+            I = d$intention, 
+            C = d$contact)
+m12.5 <- ulam(
+    alist(
+        R ~ dordlogit(phi, cutpoints), 
+        phi <- bA*A + bC*C + BI*I, 
+        BI  <- bI + bIA*A + bIC*C, 
+        c(bA, bI, bC, bIA, bIC) ~ dnorm(0, 0.5), 
+        cutpoints ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, cores = 4
+)
+```
+
+Results:
+
+```{r}
+precis(m12.5)
+```
+
+Looking at the posterior distribution of the slopes, they are all reliably negative, implying each of these reduces the rating or acceptability of the story. 
+
+Plotting the marginal posterior distributions:
+
+```{r}
+plot(precis(m12.5), xlim = c(-1.4, 0))
+```
+
+The combination of intention and contact seems to have the highest impact, while intention or contact individually have much smaller effects. 
+
+Plotting the posterior predictions helps but is difficult since for every value of predictor, we get a vector of probabilities. One common way to visualise the posterior is to use the horizontal axis for predictor and the vertical axis for cumulative probability and then drawing one curve for each response value as it changes across values of the predictor variable. 
+
+```{r results='hold'}
+## empty plot first
+
+plot(NULL, type = "n", xlab = "intention", ylab = "probability", 
+     xlim =c(0,1), ylim = c(0,1), xaxp = c(0, 1, 1), yaxp = c(0, 1, 2))
+
+# set up a data list that contains differnet combinations of
+# predictor values
+kA <- 0        # value for action
+kC <- 0        # value for contact
+kI <- 0:1      # value for intention to calculate over
+
+pdat <- data.frame(A = kA, C = kC, I = kI)
+
+# use link to get phi samples for each combo above
+phi <- link(m12.5, data = pdat)$phi
+
+# loop over first 50 samples and plot their predictions across values of
+# intention. We will use `pordlogit` to compute the cumulative probability for
+# each possible outcome value, from 1 to 7 using the samples in phi and cutpoints
+
+post <- extract.samples(m12.5)
+for(s in 1:50){
+    pk <- pordlogit(1:6, phi[s,], post$cutpoints[s,])
+    phi_mu <- colMeans(phi)
+    for( i in 1:6 ) {
+        lines(kI, pk[, i], col = grau(0.1))
+    }
+}
+points(rep(0, 6), pk[1,], col = "royalblue3", cex = 1.5, pch = 16)
+points(rep(1, 6), pk[2,], col = "royalblue3", cex = 1.5, pch = 16)
+```
+
+The black lines above indicate the boundaries between response values, numbered 1 through 7, bottom to top. The thickness of the lines (spread between lines of one category) corresponds to the variation in predictions due to varaition in samples from the posterior. There is less uncertainty in this case due to the size of the data. Horizontal axis shows intention: either zero or one. The change in height of the each boundary going from left to right indicates the predicted impact of changing a story from non-intention to intention. The cumulative probability of let's say response being <= 4 increases and so on. Thus the acceptability decreases with intention. 
+
+Another option is to show the implied histogram of outcomes. We can use `sim` to simulate posterior outcomes. 
+
+```{r}
+s <- sim(m12.5, data = pdat)
+simplehist(s, xlab = "response")
+```
+
+The black line segments are the simulated frequenceis when `intention` is 0. The blue line segments are the frequencies when intention is 1. The weight given to the middle response 4 is higher. This can be seen in the graph before as well (in the large jump from 3 to 4 and then less jumps thereafter, implying <=4 has higher chance). 
+
+Now making a triptych on the same basis along with histograms 
+
+```{r fig.width=9, fig.height=7}
+library(dplyr)
+library(tidyr)
+# making a function of the above
+
+# function to draw the posterior lines
+plot_ordered_posterior <- function(A, C){
+    pdat <- data.frame(A = A, C = C, I = 0:1)
+    phi <- link(m12.5, data = pdat)$phi
+    
+    plot(NULL, type = "n", xlab = "intention", ylab = "probability", 
+         main = sprintf("action = %d contact = %d", A, C), 
+         xlim =c(0,1), ylim = c(0,1), xaxp = c(0, 1, 1), yaxp = c(0, 1, 2))
+    
+    for(s in 1:50){
+        pk <- pordlogit(1:6, phi[s, ], post$cutpoints[s,])
+        for(i in 1:6)
+            lines(0:1, pk[,i], col = grau(0.1))
+        
+    }
+    points(rep(0, 6), pk[1,], col = "royalblue3", cex = 1.5, pch = 16)
+    points(rep(1, 6), pk[2,], col = "royalblue3", cex = 1.5, pch = 16)
+}
+
+# function to draw the histograms of posterior outcomes
+plot_ordered_hist <- function(A, C){
+    pdat <- data.frame(A = A, C = C, I = 0:1)
+    s <- sim(m12.5, data = pdat)
+    simplehist(s, xlab = 'response')
+    mtext(sprintf("action = %d contact = %d", A, C), )
+}
+
+withr::with_par( 
+    list(mfrow = c(2, 3)), 
+    code = {
+       plot_ordered_posterior(A = 0, C = 0) 
+       plot_ordered_posterior(A = 1, C = 0) 
+       plot_ordered_posterior(A = 0, C = 1) 
+       
+       plot_ordered_hist(A = 0, C = 0) 
+       plot_ordered_hist(A = 1, C = 0) 
+       plot_ordered_hist(A = 0, C = 1) 
+    }
+)
+```
+
+For action = 0 and contact = 1, we can see the much larger effect of intention (0 to 1). 
+
+# Ordered categorical predictors
+
+This time, we will look at incoporating ordinal variables as predictors. The `Trolley` data had levels of education which can be used as a predictor. 
+
+```{r}
+library(rethinking)
+data(Trolley)
+d <- Trolley
+levels(d$edu)
+```
+
+There are 8 levels, but unfortunately not in the right order. Correcting this, with proper order as:
+Elementary School < Middle School < Some High School < High School Graduate < Some College < Bachelor's Degree < Master's Degree < Graduate Degree
+
+```{r}
+edu_levels <- c( 6 , 1 , 8 , 4 , 7 , 2 , 5 , 3 )
+d$edu_new  <- edu_levels[d$edu]
+```
+
+Above, we have middle school as the 6th level originaly, but we would like it to have the second position after reordering, so we have `edu_levels` have `2` as its value at `6th` idx. 
+
+The notion with ordered predictor variables is that each step up in the varaible's value comes with its own incremental or marginal effect on the outcome. We would want to infer all those incremental effects, so will need K-1 parameters. The first level (Elem School here) will be absorbed into the intercept. Then the first increment from moving to Elementary to Middle school leads to:
+
+$$
+\phi_i = \delta_1 + \text{other stuff}
+$$
+where the parameter $\delta_1$ is the effect of completing Middle School and "other stuff" is all of the other terms the model might have. With "Some High School" we have:
+
+$$
+\phi_i = \delta_1 + \delta_2 +\text{other stuff}
+$$
+where $\delta_2$ is the incremental effect of finishing 'Some High School'
+
+We get incremental effects for each level of education. An individual with the Graduate degree (highest level) gets the linear model:
+
+$$
+\phi_i = \sum_{j=1}^{7}\delta_j + \text{other stuff}
+$$
+
+The sum of all the delta parameters is the max education effect. It is convenient for interpretation if we call this max sum an ordinary coefficient like $\beta_E$ and then let the $\delta$ params be fractions of it. If we also make a dummy $\delta_0=0$, then it can all be written compactly:
+
+$$
+\phi_i = \beta_E \sum_{j=0}^{E_i - 1}\delta_j + \text{other stuff}
+$$
+where $E_i$ is the completed education level of individual __i__. Now the sum of every $\delta_j$ is 1 and we can interpret the max effect from $\beta_E$. An individual with Education level = 1 gets no effect since $\beta_E \delta_0=0$
+
+$\beta_E$ also helps us define priors. If we want all deltas to have the same incremental effect we can have the same priors for all, and still have a separate prior for max effect for $beta_E$. It can be negative too, in which case all incremental effects are negative too. 
+
+> Model
+
+We will now build education into the ordered logit model as an ordered predictor. Here's the model in mathematical form:
+
+$$
+\begin{align}
+R_i &\sim \operatorname{Ordered-logit}(\phi_i, \kappa) \\
+\phi_i &= \beta_E \sum_{j=0}^{E_i - 1} \delta_j + \beta_A A_I + \beta_I I_i + \beta_C C_i \\
+
+\text{Priors:} \\
+\kappa_K &\sim \text{Normal}(0, 1.5) \\
+\beta_A, \beta_I, \beta_C, \beta_E &\sim \text{Normal}(0, 1) \\
+\delta &\sim \text{Dirichlet}(\alpha)
+\end{align}
+$$
+
+For the priors, the cutpoints are on the logit scale, so regularising priors have been used for kappa [N(0,1.5)]. The slopes get narrower priors. For delta we use a **Dirichlet Distribution**. 
+
+> Dirichlet Distribution
+
+This is a multivariate extension of the beta distribution. Like the beta, it is a dist for probs, values between zero and one that all sum to one. The beta is a distribution for two probabilities. The Dirichlet is a distribution for any number. Like the beta, it is parametrized by the pseudo-counts of observations. In the beta these were $\alpha$ and $\beta$, the prior counts of success and failures. 
+
+In the Dirichlet, there is only a long vector $\alpha$ with pseudo-counts for each possibility. If we assign the same value to each, it becomes a uniform prior. The larger the $\alpha$ values, the more prior info that the probs are all the same. 
+
+
+We will use a weak prior with each value inside $\alpha$ being 2. Let's simulate from this prior and visualise the implications. 
+
+```{r}
+library(gtools)
+set.seed(1805)
+delta <- rdirichlet(10, alpha = rep(2, 7))
+str(delta)
+```
+
+We get 10 vectors of 7 probabilities, each summing to 1. Plotting these:
+
+```{r}
+h <- 3
+plot(NULL, xlim = c(1,7), ylim = c(0, 0.4), 
+     xlab = "index", ylab = "probability")
+for(i in 1:nrow(delta))
+    lines(1:7, delta[i, ], type = "b", 
+          pch = ifelse(i == h, 16, 1), 
+          lwd = ifelse(i == h, 4, 1.5), 
+          col = ifelse(i == h, 'black', col.alpha("black", 0.7)))
+```
+
+One of the vectors has been highlighted. The prior here doesn't make any assumptions that all the probs are going to be same, or that some are going to be smaller/larger than others. For each of the 7 id, we get probs taking up a wide space. 
+
+Code:
+```{r results='hide'}
+dat <- list(
+    R = d$response, 
+    action = d$action, 
+    intention = d$intention, 
+    contact = d$contact, 
+    E = as.integer(d$edu_new),    # edue_new as an index
+    alpha = rep(2, 7)
+)
+m12.6 <- ulam(
+    alist(
+        R ~ ordered_logistic(phi, kappa), 
+        phi <- bE*sum(delta_j[1:E]) + bA * action + bI * intention + bC*contact, 
+        kappa ~ normal(0, 1.5), 
+        c(bA, bI, bC, bE) ~ normal(0, 1), 
+        vector[8]: delta_j <<- append_row(0, delta), 
+        simplex[7]: delta ~ dirichlet(alpha)
+    ), data = dat, chains = 4, cores = 4
+)
+```
+
+The data list contains the alpha prior. We pass it as "data", but it is Dirichlet prior from before. 
+
+The model itself is like the previous models except for the `vector` and `simplex` lines and the bE term in the linear model. 
+
+In order to sum over the $\delta$ params, the linear model contains the term `bE * sum( delta_j[1:E] )`. This is the $\beta_E \sum_{j=0}^{E_i - 1} \delta_j$. The vector `delta_j` has 8 values, the first one is $\delta_0=0$, while the other 7 are the other $\delta$ params. The `[1:E]` pulls out the first E values, where E is the education level of each individual. 
+
+`delta_j` is built by appending the actual `delta` param with a zero: `delta_j <<- append_row(0, delta)`. The `append_row` is a Stan function. The `vector[8]` is type and size declaration. 
+
+For the prior for $\delta$ params, these should sum to one. This kind of vector, in which all values sum to one (or any other constant) is called a **SIMPLEX**. Stan provides a special variable type `simplex` which enforces the sum to one constraint. And then we assign the delta vector the Dirichlet prior. 
+
+Let's look at the marginal posterior distribution now:
+
+```{r}
+precis(m12.6, depth = 2, omit = "kappa")
+```
+
+The overall association of education bE is negative, i.e. more educated people disapproved more stories. The effect is smaller than the 3 treatment effects though. At the posterior mean, the most educated individuals in the sample disapprove of everything by about -0.3, while adding action to a story reduces appeal by about 0.7. (Education is not a randomized treatment variable so we should not think of it causally yet). 
+
+To look at the incremental effects, the `delta` params, we'll have to look at them as a multivariate distribution. Easiest way is to use the `pairs` command:
+
+```{r fig.width=8, fig.height=8}
+delta_labels <- c("Elem","MidSch","SHS","HSG","SCol","Bach","Mast","Grad")
+pairs(m12.6, pars = "delta", labels = delta_labels)
+```
+
+All these params are negatively correlated with one another. This is a result of the constraint that they all sum to one, so that if one increases, the others have to decrease. All education levels except Some College produce some modest increment on average in disapproval. Only Some College has a tiny incremental effect. 
+
+We will now compare the results of this model with a conventional model that treats education as a continuous variable. We will normalize education to have its range be between 0-1. This will help resulting params comparable to the one in `m12.6`. 
+
+```{r results='hide'}
+dat$edu_norm <- normalize(d$edu_new)
+m12.7 <- ulam(
+    alist(
+        R ~ ordered_logistic( mu , cutpoints ),
+        mu <- bE*edu_norm + bA*action + bI*intention + bC*contact,
+        c(bA,bI,bC,bE) ~ normal( 0 , 1 ),
+        cutpoints ~ normal( 0 , 1.5 )
+    ), data=dat , chains=4 , cores=4 )
+```
+
+```{r}
+precis(m12.7)
+```
+
+The effect of education is much less pronounced now. This is possibly because the effect isn't actually linear. Different levels have different incremental associations. 
+
+> From a causal perspective, a concern is that education is highly correlated with age, so including Education opens a backdoor from age to rating. 

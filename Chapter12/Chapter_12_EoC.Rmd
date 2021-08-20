@@ -12,7 +12,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error = FALSE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error = FALSE, cache = TRUE)
 library(rstan)
 rstan_options(auto_write = TRUE)
 Sys.setlocale(locale = "Chinese")
@@ -21,5 +21,1648 @@ Sys.setlocale(locale = "Chinese")
 # Easy Questions
 
 ## 12E1
+> What is the difference between an ordered categorical variable and an unordered one? Define and then give an example of each.
 
-WIP
+In an unordered categorical variable, there is no relationship or ordering between the categories. For instance, pet - which could be dog vs cat vs bird. There is no inherent ordering between these. 
+
+In comparison, in an ordered categorical variable, the different categories are related and there is an inherent, natural ordering between the different categories. For instance - the responses to a questionnaire could be on Likert scale, extremely dissatisfied < somewhat dissatisfied < neutral < somewhat satisfied < extremely satisfied. There is a natural ordering for this variable, although the difference between any two levels need not be the same. 
+
+## 12E2 
+> What kind of link function does an ordered logistic regression employ? How does it differ from an ordinary logit link?
+
+Ordered logistic regression employs cumulative link function.  It creates a linear model on the log cumulative odds of the outcome, compared to the non cumulative odds in the ordinary logit link. 
+
+Ordinary Logit:
+
+$$
+\log \frac{Pr(y=k)}{1 - Pr(y=k)}
+$$
+vs Cumulative Logit:
+$$
+\log \frac{Pr(y \le k)}{Pr(y > k)}
+$$
+
+## 12E3
+> When count data are zero-inflated, using a model that ignores zero-inflation will tend to induce which kind of inferential error?
+
+With a model that ignores zero-inflation, say, regular Poisson regression, the model will expect much fewer zeros. Also, the model's expecation about the rate of events will be pushed lower towards zero, lower than it truly is. 
+
+## 12E4 
+> Over-dispersion is common in count data. Give an example of a natural process that might produce over-dispersed counts. Can you also give an example of a process that might produce underdispersed counts?
+
+Over-dispersion - change in revenue of companies from year to year. You would expect most to be centered around zero, however, a number of companies will go through either very bad years, or very good years, leading to much fatter tails. 
+
+This is not a count example though. 
+
+**Over-dispersion** Count example - Counting meteors during night. Some sites have more, some have less. This can lead to over-dispersion in the data. 
+
+
+**Under-dispersion** Count example - Traffic police officers giving ticket. Assume it follows a Poisson process with mean 8. However, there's a daily target of 5, so they stop giving tickets after they have given 5. Let's simulate and see if this actually has under-dispersion, implying variance will be lower than expected. For a Poisson process, variance equals mean, so under-dispersion will lead to a lower variance than mean.
+
+```{r}
+set.seed(456)
+# assume 8 tickets per day by an officer, simulate for a year
+tickets <- rpois(365, 8) 
+sprintf("Mean = %f ; Var = %f", mean(tickets), var(tickets))
+```
+
+The mean and variance are equal as expected. Now let us cap individual tickets to 5 (the daily target). 
+```{r}
+tickets2 <- pmin(tickets, 5)
+sprintf("Mean = %f ; Var = %f", mean(tickets2), var(tickets2))
+```
+
+Now the variance is much lower than expected (0.27 vs ~4.8). 
+
+We will also get under-dispersion, if we had assumed that there was a minimum target of at least 5. 
+
+```{r}
+tickets3 <- pmax(tickets, 5)
+sprintf("Mean = %f ; Var = %f", mean(tickets3), var(tickets3))
+```
+
+Again, we get variance lower than mean. 
+
+# Medium Questions
+
+## 12M1
+> At a certain university, employees are annually rated from 1 to 4 on their productivity, with 1 being least productive and 4 most productive. In a certain department at this certain university in a certain year, the numbers of employees receiving each rating were (from 1 to 4): 12, 36, 7, 41. Compute the log cumulative odds of each rating.
+
+```{r}
+ratings <- c(12, 36, 7, 41)
+
+# cumulative proportions
+cum_ratings <- cumsum(ratings) / sum(ratings)
+
+# logit function
+logit <- function(x) log(1 / (1/x - 1))
+
+lco <- logit(cum_ratings)
+lco
+```
+
+## 12M2
+> Make a version of Figure 12.5 for the employee ratings data given just above.
+
+```{r}
+# draw the line connecting the cumulative proportions
+plot(1:4, cum_ratings, type = "b", 
+     xlab = 'Rating', ylab = 'Cumulative Proportion', 
+     ylim = c(0,1), xlim = c(1, 4.1), pch = 1, cex = 1.5, xaxt = "n")
+axis(side = 1, at = 1:4) # axis at 1, 2, 3, 4 only
+
+# for each rating, draw a bar for cumulative proportion and
+# individual proportion
+
+for(i in 1:4){
+    k <- i + 0.05  # separation between two bars on x axis
+    y1 <- if(i == 1) 0 else cum_ratings[i-1] # beginning of blue bar 
+    y2 <- cum_ratings[i]                     # end of blue bar
+    
+    # grey line
+    lines(c(i, i), c(0, y2), lwd = 4, col = 'grey')
+    
+    # blue line
+    lines(c(k, k), c(y1, y2), lwd = 4, col = "royalblue3")
+    
+    # text for rating
+    text(x = i + 0.2, y = y2 - 0.04, labels = as.character(i), col = 'royalblue2')
+}
+```
+
+
+## 12M3
+> Can you modify the derivation of the zero-inflated Poisson distribution (ZIPoisson) from the chapter to construct a zero-inflated binomial distribution?
+
+Let us assume that there is a binomial process with some probability of success $p$ and the second process that generates zero occurs with probability $z$. 
+
+Thus we have the likelihood of observing a zero as:
+
+$$
+\begin{align}
+Pr(0|z, p) &= Pr(\text{zero}|z) + Pr(\text{not zero}|z) \times \text{Binomial}(0| N, p) \\
+&= z + (1-z) {N \choose 0} p^0 (1-p)^N \\
+&= z + (1-z)(1-p)^N
+\end{align}
+$$
+
+Similarly, the likelihood of observing a non-zero $y$ is:
+
+$$
+\begin{align}
+Pr(y|y>0, z, p) &= Pr(\text{zero}|z) (0) + Pr(\text{not zero}|z) \times \text{Binomial}(y>0| N, p) \\
+&= 0 + (1-z) \times \sum_{k=1}^{k=N} \text{Binomial}(k | N, p) \\ 
+&= (1-z) \times (1 - \text{Binomial}(0 | N, p)) \\
+&= (1-z) [1 - (1-p)^N]
+\end{align}
+$$
+
+Thus to summarise, the likelihood of the zero-inflated Binomial distribution is:
+
+$$
+\begin{align}
+Pr(y = 0 | z, p) &= z + (1-z)(1-p)^N \\
+Pr(y > 0 | z, p) &= (1-z) [1 - (1-p)^N]
+\end{align}
+$$
+
+
+# Hard Questions
+
+## 12H1 
+> In 2014, a paper was published that was entitled “Female hurricanes are deadlier than male hurricanes.” [Jung et al. (2014)](https://www.pnas.org/content/111/24/8782) As the title suggests, the paper claimed that hurricanes with female names have caused greater loss of life, and the explanation given is that people unconsciously rate female hurricanes as less dangerous and so are less likely to evacuate. Statisticians severely criticized the paper after publication. Here, you’ll explore the complete data used in the paper and consider the hypothesis that hurricanes with female names are deadlier. Acquaint yourself with the columns by inspecting the help ?Hurricanes. In this problem, you’ll focus on predicting deaths using femininity of each hurricane’s name. Fit and interpret the simplest possible model, a Poisson model of deaths using femininity as a predictor. You can use quap or ulam. Compare the model to an intercept-only Poisson model of deaths. How strong is the association between femininity of name and deaths? Which storms does the model fit (retrodict) well? Which storms does it fit poorly?
+
+```{r}
+library(rethinking)
+data("Hurricanes")
+d <- Hurricanes
+```
+
+`femininity` is a continuous variable with values in the range 1 (completely masculine) to 11 (completely feminine). 
+
+Mathematically we have:
+
+$$
+\begin{align}
+\operatorname{Death}_i &\sim \text{Poisson}(\lambda)  \\
+\lambda_i &= \alpha + \beta (\operatorname{Femininity} - \overline{\text{Femininity}}) \\
+\alpha &\sim \text{TBD} \\
+\beta &\sim \text{TBD}
+\end{align}
+$$
+Average deaths per hurricane seem to be in the range of 0-100 (barring extreme ones) [Source](https://www.iii.org/table-archive/20454). 
+
+We had a similar situation in chapter 11, thus we will use the same priors as then, thus the priors for $\alpha$ and $\beta$ would be Normal(3, 0.5) and Normal(0, 0.2) repsectively. 
+
+```{r}
+dat_list <- list(D = d$deaths, 
+                 Fm = d$femininity)
+
+# using quap for speed
+mh1 <- quap(
+    alist(
+        D ~ dpois(lambda), 
+        log(lambda) <- a + bf*Fm, 
+        a ~ dnorm(3, 0.5), 
+        bf ~ dnorm(0, 0.2)
+    ), data = dat_list
+)
+mh1_intercept <- quap(
+    alist(
+        D ~ dpois(lambda), 
+        log(lambda) <- a, 
+        a ~ dnorm(3, 0.5)
+    ), data = dat_list
+)
+```
+
+Comparing the two models using WAIC and PSIS. 
+
+```{r}
+compare(mh1, mh1_intercept, func = WAIC)
+compare(mh1, mh1_intercept, func = PSIS)
+```
+
+We get similar results from both. There's not much difference between the two models. dSE >> dWAIC/dPSIS, signifying that femininity does not add any significant predictive power. 
+
+Checking the posterior distribution:
+```{r}
+precis(mh1)
+```
+
+The estimate for femininity's association is fairly weak at 0.07 but significantly positive (89% interval between 0.06 and 0.09). This signifies that according to the model deaths do increasae as femininity of hurrican name increases, i.e. as names become more feminine. 
+
+```{r fig.width=10}
+postcheck(mh1, window = 95, prob = 0.97)
+```
+
+Most of the actual deaths fall outside the simulated counts, mostly below. This seems to be a case of over-dispersion. Let's simulate the counts for the given data and see how many actual found within the CI predicted by model. 
+
+```{r paged.print = TRUE}
+sims <- sim(mh1)
+sim_mu <- colMeans(sims)
+sim_ci <- apply(sims, 2, PI, 0.97)
+
+library(dplyr, warn.conflicts = FALSE)
+d %>% 
+    mutate(low = sim_ci[1,], 
+           high = sim_ci[2,], 
+           within = ifelse(deaths >= low & deaths <= high, "within bounds", "outside boudns")) %>% 
+    filter(within == "within bounds")
+```
+
+The model only fit the above storms whose deaths fell within its bounds. All the other were outside its prediction intervals. 
+
+Doing another posterior check:
+
+```{r}
+fem_seq <- seq(1, 11, length.out = 30)
+sims <- sim(mh1, data = list(Fm = fem_seq))
+mu <- colMeans(sims)
+ci <- apply(sims, 2, PI, 0.97)
+
+plot(d$femininity, d$deaths, pch = 20, 
+     xlab = "Femininity of Hurrican name", ylab = "Deaths caused by Hurricane", 
+     main = "Posterior predictions of Poisson model")
+lines(fem_seq, mu)
+shade(ci, fem_seq)
+```
+
+As can again be seen, most the actual deaths fall much outside the range of the model's predictions. The model does not expect as much dispersion as actually exists. 
+
+
+## 12H2 
+> Counts are nearly always over-dispersed relative to Poisson. So fit a gamma-Poisson (aka negative-binomial) model to predict deaths using femininity. Show that the over-dispersed model no longer shows as precise a positive association between femininity and deaths, with an 89% interval that overlaps zero. Can you explain why the association diminished in strength?
+
+The mathematical equation now is:
+
+$$
+\begin{align}
+\operatorname{Death}_i &\sim \text{Gamma-Poisson}(\lambda_i, \phi)  \\
+\lambda_i &= \alpha + \beta (\operatorname{Femininity} - \overline{\text{Femininity}}) \\
+\alpha &= \text{Normal}(3, 0.5) \\
+\beta &= \text{Normal}(0, 0.2) \\
+\phi &= \text{Exponential}(1)
+\end{align}
+$$
+
+```{r results = "hide"}
+mh2 <- ulam(
+    alist(
+        D ~ dgampois(lambda, phi), 
+        log(lambda) <- a + bf*Fm,
+        a ~ dnorm(3, 0.5), 
+        bf ~ dnorm(0, 0.2), 
+        phi ~ dexp(1)
+    ), data = dat_list, chains = 4, cmdstan = TRUE,  log_lik = TRUE
+)
+```
+
+Checking the posterior means:
+
+```{r}
+precis(mh2)
+```
+
+The coefficient for `femininity` now has a credible interval from -0.02 to 0.11, so it does overlap with zero. 
+
+Checking the fit of the model:
+```{r fig.width=10}
+postcheck(mh2, window = 100)
+```
+
+The model now expects a much higher dispersion in the counts and we see that almost all the observations fall within the 90% bounds of the model. 
+
+```{r}
+fem_seq <- seq(1, 11, length.out = 30)
+sims <- sim(mh2, data = list(Fm = fem_seq))
+mu <- colMeans(sims)
+ci <- apply(sims, 2, PI, 0.97)
+
+plot(d$femininity, d$deaths, pch = 20, 
+     xlab = "Femininity of Hurrican name", ylab = "Deaths caused by Hurricane", 
+     main = "Posterior predictions of Gamma-Poisson model")
+lines(fem_seq, mu)
+shade(ci, fem_seq)
+```
+
+The posterior agrees with the actual data. 
+
+The association with femininity has now decreased once the model allows extra dispersion. This implies that the extra variation must be due to some other factor and not due to the feminine nature of Hurricane's name. 
+
+## 12H3
+> In the data, there are two measures of a hurricane’s potential to cause death: damage_norm and min_pressure. Consult ?Hurricanes for their meanings. It makes some sense to imagine that femininity of a name matters more when the hurricane is itself deadly. This implies an interaction between femininity and either or both of damage_norm and min_pressure. Fit a series of models evaluating these interactions. Interpret and compare the models. In interpreting the estimates, it may help to generate counterfactual predictions contrasting hurricanes with masculine and feminine names. Are the effect sizes plausible?
+
+### Poisson Models
+
+We will consider the following three Poisson models first:
+
+> Interaction between `Femininity` and `damage_norm`
+
+$$
+\begin{align}
+\text{Deaths} &\sim \text{Poisson}(\lambda) \\
+\log (\lambda) &= \alpha + \beta_F \text{Femininity} + \beta_D \text{Damage_norm} \\
+&\qquad + \beta_{FD} \text{Femininity} \times \text{Damage_norm}  \\
+\end{align}
+$$
+
+> Interaction between `Femininity` and `min_pressure`
+
+$$
+\begin{align}
+\text{Deaths} &\sim \text{Poisson}(\lambda) \\
+\log (\lambda) &= \alpha + \beta_F \text{Femininity} + \beta_P \text{min_pressure} \\
+&\qquad + \beta_{FP} \text{Femininity} \times \text{min_pressure}  \\
+\end{align}
+$$
+> Interaction between `Femininity` and `damage_norm` and `min_pressure`
+
+We will use an accessory linear model for the interaction in this case
+
+$$
+\begin{align}
+\text{Deaths} &\sim \text{Poisson}(\lambda) \\
+\log (\lambda) &= \alpha + \beta_F \text{Femininity} \\
+&\qquad + \beta_D \text{Damage_norm}  \\
+&\qquad + \beta_P \text{min_pressure} \\
+&\qquad + \beta_{FP} \text{Femininity} \times \text{min_pressure} \\
+&\qquad + \beta_{FD} \text{Femininity} \times \text{Damage_norm}
+\end{align}
+$$
+
+Performing a prior distribution check for the first model, to avoid explosive growth, we need to assign much weaker priors to `femininity`. Below we plot priors at femininity = 1 and 11 (completely male vs completely female names). The priors for female names become explosive at even Normal(0, 0.3). We therefore use Normal(0, 0.02) for both at which we get more flatter priors that still allow for some explosive growth. 
+
+```{r fig.height=8}
+N <- 1e2
+a   <- rnorm(N, 3, 0.5)
+bF  <- rnorm(N, 0, 0.02)
+bD  <- rnorm(N, 0, 0.3)
+bFD <- rnorm(N, 0, 0.02)
+
+withr::with_par(
+    list(mfrow = c(2, 1)), 
+    {
+        # first for male names, so assume femininity = 1 (least)
+        Fm <- 1
+        plot(NULL, xlim = c(-3, 3), ylim = c(0, 200), 
+             xlab = "Normalised Damage ", ylab = "Deaths", 
+             main = "femininity = 1")
+        
+        for(i in 1:N)
+            curve(exp(a[i] + bF[i]*Fm + bD[i]*x + (bFD[i]*Fm*x)), from = -3, to = 3, add = TRUE, col = grau())
+        
+        # first for male names, so assume femininity = 11 (least)
+        Fm <- 11
+        plot(NULL, xlim = c(-3, 3), ylim = c(0, 200), 
+             xlab = "Normalised Damage ", ylab = "Deaths", 
+             main = "femininity = 11")
+        
+        for(i in 1:N)
+            curve(exp(a[i] + bF[i]*Fm + bD[i]*x + (bFD[i]*Fm*x)), from = -3, to = 3, add = TRUE, col = grau())
+        
+    }
+)
+```
+
+Modelling the three:
+
+```{r}
+# add the two new vars after standardizing (standardizing for easier priors)
+dat_list$dm <- standardize(d$damage_norm)
+dat_list$mp <- standardize(d$min_pressure)
+
+# femininity interacts with damage norm
+mh3_1 <- quap(
+    alist(
+        D ~ dpois(lambda), 
+        log(lambda) <- a + bF*Fm + bD*dm + bFD*Fm*dm, 
+        a ~ dnorm(3, 0.5), 
+        bD ~ dnorm(0, 0.3), 
+        c(bF, bFD) ~ dnorm(0, 0.02)
+    ), data = dat_list
+)
+# femininity interacts with min pressure
+mh3_2 <- quap(
+    alist(
+        D ~ dpois(lambda), 
+        log(lambda) <- a + bF*Fm + bP*mp + bFP*Fm*mp, 
+        a ~ dnorm(3, 0.5), 
+        bP ~ dnorm(0, 0.3), 
+        c(bF, bFP) ~ dnorm(0, 0.02)
+    ), data = dat_list
+)
+# femininity interacts with both damage norm and min pressure
+mh3_3 <- quap(
+    alist(
+        D ~ dpois(lambda), 
+        log(lambda) <- a + bF*Fm + bD*dm + bP*mp + bFD*Fm*dm + bFP*Fm*mp, 
+        a ~ dnorm(3, 0.5), 
+        c(bD, bP) ~ dnorm(0, 0.3), 
+        c(bF, bFD, bFP) ~ dnorm(0, 0.02)
+    ), data = dat_list
+)
+```
+
+```{r fig.height=7}
+plot(coeftab(mh3_1, mh3_2, mh3_3), pars = c("a", "bD", "bP", "bF", "bFD", "bFP"))
+```
+
+```{r}
+coeftab(mh3_1, mh3_2, mh3_3)
+```
+
+From the posterior means (both table + plot), we have: 
+
+- the effect of femininity is still strictly positive for all three models. 
+- normalised damage has a positive effect when it is alone in the model. In the last model with damage + min_pressure, it has a much lower effect 
+- min_pressure has a negative effect (the help doc does say less pressure leads to stronger storms, so this is within expectations)
+- the interaction terms are positive and small (same range as estimate for femininity's association)
+
+Let us create some counterfactual plots for the three models to understand the effect of interaction terms:
+
+### Counterfactual Plots {.tabset .tabset-fade}
+
+```{r}
+library(tidyr)
+damage_seq <- seq(-1, 5, length.out = 100)
+minp_seq   <- seq(-3, 2, length.out = 100)
+
+clean_simulations <- function(tbl){
+    tbl %>% 
+        mutate(mu = purrr::map(sims, colMeans), 
+               ci = purrr::map(sims, ~apply(., 2, PI)), 
+               low = purrr::map(ci, ~.[1,]), 
+               high = purrr::map(ci, ~.[2,])) %>% 
+        unnest(c(data, mu, low, high)) %>% 
+        select(-c(id, sims, ci)) %>% 
+        mutate(femininity = factor(Fm))
+}
+
+plot_counterfactual <- function(tbl, var, model_name){
+    tbl %>% 
+        ggplot(aes(x = {{var}}, y = mu)) + 
+        geom_line(aes(colour = femininity)) + 
+        geom_ribbon(aes(ymin = low, ymax = high, fill = femininity), alpha = 0.2) + 
+        labs(y = "Deaths", 
+             title = sprintf("Posterior distribution for %s", model_name))
+}
+```
+
+#### Model 1 {mh3_1}
+
+```{r}
+simulations1 <- crossing(dm = damage_seq, 
+         Fm = c(1, 5, 11)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(mh3_1, data = list(dm = .$dm, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+plot_counterfactual(simulations1, dm, "mh3_1") + 
+    geom_point(aes(x = standardize(damage_norm), y = deaths), data = d) + 
+    labs(x = "Damage Norm (standardized)")
+```
+
+The model does not fit well to the data, there's still problem of over-dispersion, suggesting we should use the Gamma-Poisson model. Currently, the model does predict higher deaths for more feminine names. 
+
+#### Model 2 {mh3_2}
+
+```{r}
+simulations2 <- crossing(mp = minp_seq, 
+         Fm = c(1, 5, 11)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(mh3_2, data = list(mp = .$mp, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+plot_counterfactual(simulations2, mp, "mh3_2") + 
+    geom_point(aes(x = standardize(min_pressure), y = deaths), data = d) + 
+    labs(x = "Min Pressure (standardized)")
+```
+
+We have similar results here too. Does not fit well. Has not taken into account the disperson present in the data and predicts more deaths for hurricanes with feminine names. 
+
+### Using Gamma-Poisson
+
+```{r results='hide'}
+# femininity interacts with damage norm
+dgp1 <- ulam(
+    alist(
+        D ~ dgampois(lambda, phi), 
+        log(lambda) <- a + bF*Fm + bD*dm + bFD*Fm*dm, 
+        a ~ dnorm(3, 0.5), 
+        bD ~ dnorm(0, 0.3), 
+        c(bF, bFD) ~ dnorm(0, 0.02), 
+        phi ~ dexp(1)
+    ), data = dat_list, chains = 4, cmdstan = TRUE, log_lik = TRUE
+)
+# femininity interacts with min pressure
+dgp2 <- ulam(
+    alist(
+        D ~ dgampois(lambda, phi), 
+        log(lambda) <- a + bF*Fm + bP*mp + bFP*Fm*mp, 
+        a ~ dnorm(3, 0.5), 
+        bP ~ dnorm(0, 0.3), 
+        c(bF, bFP) ~ dnorm(0, 0.02), 
+        phi ~ dexp(1)
+    ), data = dat_list, chains = 4, cmdstan = TRUE
+)
+# femininity interacts with both damage norm and min pressure
+dgp3 <- ulam(
+    alist(
+        D ~ dgampois(lambda, phi), 
+        log(lambda) <- a + bF*Fm + bD*dm + bP*mp + bFD*Fm*dm + bFP*Fm*mp, 
+        a ~ dnorm(3, 0.5), 
+        c(bD, bP) ~ dnorm(0, 0.3), 
+        c(bF, bFD, bFP) ~ dnorm(0, 0.02), 
+        phi ~ dexp(1)
+    ), data = dat_list, chains = 4, cmdstan = TRUE
+)
+```
+
+
+```{r fig.height=7}
+plot(coeftab(dgp1, dgp2, dgp3), pars = c("a", "bD", "bP", "bF", "bFD", "bFP"))
+```
+
+```{r}
+coeftab(dgp1, dgp2, dgp3)@coefs %>% 
+    as_tibble(rownames = "term") %>% 
+    filter(!stringr::str_detect(term, "lambda"))
+```
+
+- Now the credible intervals for the coefficients of `femininity` overlap zero. 
+- `damage_norm` has a positive effect even in the model with `min_pressure`
+- `min_pressure` has a negative effect by itself, but a lower effect when `damage_norm` is included as well. 
+- the interaction of `min_pressure` with `femininity` overlaps with zero
+- the interaction of `damage_norm` with `femininity` is slightly positive
+
+Plotting the posterior distribution:
+
+### Counterfactual Plots {.tabset .tabset-fade}
+
+```{r}
+damage_seq <- seq(-1, 5, length.out = 100)
+minp_seq   <- seq(-3, 2, length.out = 100)
+```
+
+#### Model 1 {dgp1 - F : Dmg}
+
+```{r}
+simulations3 <- crossing(dm = damage_seq, 
+         Fm = c(1, 5, 11)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(dgp1, data = list(dm = .$dm, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+(p1 <- plot_counterfactual(simulations3, dm, "dgp1") + 
+    geom_point(aes(x = standardize(damage_norm), y = deaths), data = d) + 
+    labs(x = "Damage normalized (standardized)") + 
+    coord_cartesian(ylim = c(0, 300)))
+```
+
+The model expectes very high dispersion, and femininity seems to cause very negligible differnence in damage (the confidence intervals are overlapping). The model expects very explosive growth in deaths with increase in damage, which might not be plausible. 
+
+#### Model 2 {dgp2 - F : Pr}
+
+```{r}
+simulations4 <- crossing(mp = minp_seq, 
+         Fm = c(1, 5, 11)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(dgp2, data = list(mp = .$mp, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+plot_counterfactual(simulations4, mp, "dgp2") + 
+    geom_point(aes(x = standardize(min_pressure), y = deaths), data = d) +
+    labs(x = "Min Pressure (standardized)")
+```
+
+This is similar to the model with just `damage_norm`. It also has very wide confidence intervals for the predictions and assumes very high explosive growth in deaths as min_pressure decreases. 
+
+#### Model 3 {dgp2 - F : Dmg : Pr}
+
+```{r fig.height=7}
+simulations5 <- crossing(mp = minp_seq, 
+         Fm = c(1, 5, 11), 
+         dm = c(-3, 0, 3)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(dgp3, data = list(mp = .$mp, dm = .$dm, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+simulations5 %>% 
+    mutate(dm = case_when(
+        dm == -3 ~ "low damage_norm (-3 sd)", 
+        dm ==  0 ~ "avg damage_norm", 
+        dm == +3 ~ "high damage_norm (+ 3 sd)", 
+    )) %>% 
+    plot_counterfactual(mp, "dgp3") + 
+    # geom_point(aes(x = standardize(min_pressure), y = deaths), data = d, alpha = 0.4) + 
+    facet_wrap(~dm, ncol = 1, scales = "free_y") + 
+    labs(x = "min_pressure", 
+         subtitle = "Effect of min_pressure on deaths at three different values of damage_norm")
+```
+
+Here we create a triptych of counterfactual plots of deaths against min_pressure. The three panels have three different values of damage_norm. damage_norm was standardized before, so we take -3, 0 and +3 as three values, signifying very low, average and very high damage respectively. Just like before we get higher deaths as min_pressure decreases, but the effect changes greatly with different values of damage_norm. (Notice that the y-scales are different for the three plots). 
+
+- For avg damage_norm, the model's predictions of deaths range between 0-100 and Femininity doesn't seem to have any effect. 
+- For high damage_norm, the deaths are highest, with model predicting as high as 2000 deaths. The bands for higher feminine names are much wider, implying model predicts higher damages for more feminine names of hurricanes. 
+- For low damage_norm, the model predicts much lower deaths, between 0-20 no matter the range of min_pressure. Surprisingly, the intervals for male names have much higher bands. 
+
+Overall, there does seem to be an interaction effect between damage_norm and femininity. 
+
+
+## 12H4 
+> In the original hurricanes paper, storm damage (damage_norm) was used directly. This assumption implies that mortality increases exponentially with a linear increase in storm strength, because a Poisson regression uses a log link. So it’s worth exploring an alternative hypothesis: that the logarithm of storm strength is what matters. Explore this by using the logarithm of damage_norm as a predictor. Using the best model structure from the previous problem, compare a model that uses log(damage_norm) to a model that uses damage_norm directly. Compare their PSIS/WAIC values as well as their implied predictions. What do you conclude?
+
+From the previous sectioon we found that there definitely seemed to be an interaction between damage_norm and femininity, while min_pressure seemed to have a much lower effect. We will be thus using the model that includes `damage_norm` and `femininity` and their interaction. 
+
+### Priors
+
+Checking if priors from before are still appropriate:
+
+```{r fig.height=7}
+N <- 1e2
+a   <- rnorm(N, 3, 0.5)
+bF  <- rnorm(N, 0, 0.02)
+bD  <- rnorm(N, 0, 0.3)
+bFD <- rnorm(N, 0, 0.02)
+
+withr::with_par(
+    list(mfrow = c(2, 1)), 
+    {
+        # first for male names, so assume femininity = 1 (least)
+        Fm <- 1
+        plot(NULL, xlim = c(0, 3), ylim = c(0, 200), 
+             xlab = "Log Normalised Damage ", ylab = "Deaths", 
+             main = "femininity = 1")
+        
+        for(i in 1:N)
+            curve(exp(a[i] + bF[i]*Fm + bD[i]*log(x) + (bFD[i]*Fm*x)), from = 0.0001, to = 11, add = TRUE, col = grau())
+        
+        # first for male names, so assume femininity = 11 (least)
+        Fm <- 11
+        plot(NULL, xlim = c(0, 3), ylim = c(0, 200), 
+             xlab = "Log Normalised Damage ", ylab = "Deaths", 
+             main = "femininity = 11")
+        
+        for(i in 1:N)
+            curve(exp(a[i] + bF[i]*Fm + bD[i]*log(x) + (bFD[i]*Fm*x)), from = 0.0001, to = 11, add = TRUE, col = grau())
+        
+    }
+)
+```
+
+There does seem to be some explosive growth near 0 (log(0) = -Inf) but overall it seems flat enough. So we will continue with the same priors. 
+
+
+### Modelling
+
+```{r results='hide'}
+# should I standardise this? Thoughts for later
+dat_list$dml <- log(d$damage_norm)
+
+# dgp1 from previous problem
+mh4 <- ulam(
+    alist(
+        D ~ dgampois(lambda, phi), 
+        log(lambda) <- a + bF*Fm + bD*dml + bFD*Fm*dml, 
+        a ~ dnorm(3, 0.5), 
+        bD ~ dnorm(0, 0.3), 
+        c(bF, bFD) ~ dnorm(0, 0.02), 
+        phi ~ dexp(1)
+    ), data = dat_list, chains = 4, cmdstan = TRUE, log_lik = TRUE
+)
+```
+
+Let's check the posterior means:
+
+```{r}
+precis(mh4)
+```
+
+Comparing against model that used `damage_norm` directly (without log). 
+
+```{r}
+plot(coeftab(mh4, dgp1), prob = 0.89, pars = c("a", "bD", "bF", "bFD"))
+```
+
+The effect of `femininity` has not changed, neither the effect of the interaction. Let's plot the posterior to see the predictions.
+
+```{r fig.height=8}
+# create sequence of log of damage norm, assuming 
+# damages range from $1 to ~$500k
+dml_seq <- seq(0.01, 13, length.out = 30)
+simulations6 <- crossing(dml = dml_seq, 
+                         Fm = c(1, 5, 11)) %>% 
+    mutate(id = Fm) %>% 
+    nest(data = -id) %>% 
+    mutate(sims = purrr::map(data, ~sim(mh4, data = list(dml = .$dml, Fm = .$Fm)))) %>% 
+    clean_simulations()
+
+p2 <- plot_counterfactual(simulations6, dml, "mh4") + 
+    geom_point(aes(x = log(damage_norm), y = deaths), data = d) + 
+    labs(x = "Log of Damage_norm", 
+         title = "Posterior predictions for model that uses log of `damage_norm` as predictor") 
+
+library(patchwork)
+p1 / p2
+```
+
+The model now expects much less variation and shows less explosive growth with increasing `damage_norm`. 
+
+Comparing the two model's WAIC/PSIS. 
+
+```{r}
+compare(mh4, dgp1, func = WAIC)
+compare(mh4, dgp1, func = PSIS)
+```
+
+Both give similar results. dWAIC/dPSIS is not much greater than dSE, so we cannot conclude that one model is better at predicting than the other. However, from the above plot with the posterior predictions, using `damage_norm` directly implies explosive growth in the number of deaths which does not seem right (there's an upper bound on the population in a region anyway), neither does it agree very well with the data since it has a very high variation in its predictions. Overall using log of damage_norm seems to be a better choice. 
+
+## 12H5 
+> One hypothesis from developmental psychology, usually attributed to Carol Gilligan, proposes that women and men have different average tendencies in moral reasoning. Like most hypotheses in social psychology, it is descriptive, not causal. The notion is that women are more concerned with care (avoiding harm), while men are more concerned with justice and rights. Evaluate this hypothesis, using the Trolley data, supposing that contact provides a proxy for physical harm. Are women more or less bothered by contact than are men, in these data? Figure out the model(s) that is needed to address this question.
+
+
+Loading in the dataset:
+
+```{r}
+library(rethinking)
+data("Trolley")
+d <- Trolley
+```
+
+We will start off with the model `m12.5` from the chapter and add gender to it. Remember, the outcome `response` is ordinal with 7 categories. 
+
+$$
+\begin{align}
+\log \frac{Pr(y_i \le k)}{1 - Pr(y_i \le k)} &= \alpha_k - \phi_i \\
+\phi_i &= \beta_A A_i + \beta_{C[gid]} C_i + B_{I,i}I_i \\
+B_{I,i} &= \beta_I + \beta_{IA}A_i + \beta_{IC[gid]} C_i
+\end{align}
+$$
+
+Essentially, we will have two $\beta_C$, one for males and one for females, and similarly we will have two $\beta_{IC}$, one for females and another for males. 
+
+```{r results='hide'}
+dat <- list(R = d$response, 
+            A = d$action, 
+            I = d$intention, 
+            C = d$contact, 
+            gid = ifelse(d$male == 1, 2, 1)) # 1 female, 2 male
+mh5_1 <- ulam(
+    alist(
+        R ~ dordlogit(phi, cutpoints), 
+        phi <- bA*A + bC[gid]*C + BI*I, 
+        BI  <- bI + bIA*A + bIC[gid]*C, 
+        c(bA, bI, bIA) ~ dnorm(0, 0.5), 
+        c(bC, bIC)[gid] ~ dnorm(0, 0.5), 
+        cutpoints ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, cmdstan = TRUE, cores = 4,
+    
+    # assigning ordered start values helps avoid warning
+    # messages during warmup as well as ends up speeding 
+    # the modelling
+    start = list(cutpoints = c(-2, -1, 0, 1, 2, 2.5))
+)
+```
+
+Let's look at the posterior means for the two variables of interest:
+
+```{r results="hold"}
+plot(precis(mh5_1, depth = 2, pars = c("bC", "bIC")))
+precis(mh5_1, depth = 2, pars = c("bC", "bIC"))
+```
+
+Remember, one signifies females, and 2 signifies males. The estimate for contact is much lower for females than males (the intervals for both do not overlap at all), signifying contact reduces acceptability of stories for females more than males. For the interaction term of intention and contact, "bIC", the trend is not so clear, with some overlap between the two but in general the reverse trend for the means, with less acceptability of contact + intention with males vs females. 
+
+Let us plot the posterior predictions while changing gender to see the cumulative probabilities. 
+
+```{r}
+post <- extract.samples(mh5_1)
+
+plot_ordered_posterior <- function(A, C, I){
+    pdat <- data.frame(A = A, C = C, I = I, gid = 1:2)
+    phi <- link(mh5_1, data = pdat)$phi
+    
+    plot(NULL, type = "n", xlab = "gender", ylab = "probability", 
+         main = sprintf("A = %d,  C = %d, I = %d", A, C, I), 
+         xlim =c(1,2), ylim = c(0,1), xaxp = c(1, 2, 1), yaxp = c(0, 1, 2))
+    
+    for(s in 1:50){
+        pk <- pordlogit(1:6, phi[s, ], post$cutpoints[s,])
+        for(i in 1:6)
+            lines(1:2, pk[,i], col = grau(0.1))
+        
+    }
+    points(rep(1, 6), pk[1,], col = "royalblue3", cex = 1.5, pch = 16)
+    points(rep(2, 6), pk[2,], col = "royalblue3", cex = 1.5, pch = 16)
+}
+
+# function to draw the histograms of posterior outcomes
+plot_ordered_hist <- function(A, C, I){
+    pdat <- data.frame(A = A, C = C, I = I, gid = 1:2)
+    s <- sim(mh5_1, data = pdat)
+    simplehist(s, xlab = 'response')
+    mtext(sprintf("A = %d C = %d, I = %d", A, C, I))
+}
+```
+
+Plotting:
+
+```{r fig.width=8}
+withr::with_par( 
+    list(mfrow = c(2, 4)), 
+    code = {
+      
+      # line plots of cumulative probabilities
+      plot_ordered_posterior(A = 0, C = 0, I = 0)
+      plot_ordered_posterior(A = 0, C = 0, I = 1)
+      plot_ordered_posterior(A = 0, C = 1, I = 0) 
+      plot_ordered_posterior(A = 0, C = 1, I = 1) 
+      
+      # histogram of simulated counts
+      plot_ordered_hist(A = 0, C = 0, I = 0) 
+      plot_ordered_hist(A = 0, C = 0, I = 1) 
+      plot_ordered_hist(A = 0, C = 1, I = 0) 
+      plot_ordered_hist(A = 0, C = 1, I = 1) 
+    }
+)
+```
+
+With Contact = 0, there seems to be no difference in the acceptability of stories between males and females. However, when there was Contact (Contact = 1), the two plots on the right (both the line plot as well as the histogram of simulated counts) show that females find stories less acceptable in case of contact (the proxy for physical harm). For any given level, the cumulative probability is higher for females. For instance, for response = 4, $Pr(y_i \le 4|female) > Pr(y_i \le 4| male)$, implying more females rate 4 or less than males. 
+
+We can see similar results from the histogram plots. The black lines represent females, while the blue lines represent males. The black lines are higher at the lower responses (and lower at the higher response), implying females find stories with physical harm less acceptable. 
+
+In both diagrams, when intention = 1, there is an overall reduction in acceptability (higher cumulative probability for lower responses or the much higher counts for lower response categories). This effect is not seen when contact = 0. 
+
+## 12H6
+> The data in data(Fish) are records of visits to a national park. See ?Fish for details. The question of interest is how many fish an average visitor takes per hour, when fishing. The problem is that not everyone tried to fish, so the fish_caught numbers are zero-inflated. As with the monks example in the chapter, there is a process that determines who is fishing (working) and another process that determines fish per hour (manuscripts per day), conditional on fishing (working). We want to model both. Otherwise we’ll end up with an underestimate of rate of fish extraction from the park. You will model these data using zero-inflated Poisson GLMs. Predict fish_caught as a function
+of any of the other variables you think are relevant. One thing you must do, however, is use a proper Poisson offset/exposure in the Poisson portion of the zero-inflated model. Then use the hours variable to construct the offset. This will adjust the model for the differing amount of time individuals spent in the park.
+
+```{r}
+library(rethinking)
+data("Fish")
+d <- Fish
+```
+
+We will use the following predictors:
+
+- `livebait` - whether or not group used livebait to fish
+- `camper`   - whether or not group had a camper
+- `persons`  - number of adults in group
+- `hours`    - as exposure for offset
+
+The outcome is `fish_caught`
+
+The model will be:
+
+$$
+\begin{align}
+y_i &\sim \text{ZI-Poisson}(p_i, \lambda_i) \\
+\text{logit}(p_i) &= \alpha_P + \beta_{C1} \ \text{camper} + \beta_{P1} \ \text{persons}  + \beta_{ch1} \text{children} \\
+\log \lambda_i = \log \frac{\mu_i}{\tau_i} &= \alpha_{F[\text{bait}]} + \beta_{P2} \text{persons} + \beta_{C2} \ \text{camper} + \beta_{ch2} \text{children}  \tag{tau is exposure, no of hours}     \\
+\text{the third equation becomes:} \\
+\log \lambda_i &= \log( \text{hours} ) + \alpha_{F[\text{bait}]} + \beta_{P2} \text{persons} + \beta_{C2} \ \text{camper} + \beta_{ch2} \text{children} 
+\end{align}
+$$
+
+### Priors
+
+We need to decide the priors. We have 6 different variables. Let's first look at some priors for the $p$ for zero-Poisson. 
+
+```{r fig.height=7}
+N <- 100
+aP  <- rnorm(N, 0, 1)
+bC1 <- rnorm(N, 0, 0.2)
+bP1 <- rnorm(N, 0, 0.2)
+
+withr::with_par(
+  list(mfrow = c(2, 1)),  
+  {
+    # first for no camper (camper = 0)
+    camper <- 0
+    plot(NULL, xlim = c(1, 20), ylim = c(0, 1), 
+         xlab = "No of people in group", ylab = "probability of fishing", 
+         main = "Prior distribution check (camper = 0)")
+    
+    for(i in 1:N)
+      curve(inv_logit(aP[i] + bC1[i]*camper + bP1[i] * x) , from = -5, to = 20, add = TRUE, col = grau())
+            
+    # first for no camper (camper = 1)
+    camper <- 1
+    plot(NULL, xlim = c(1, 20), ylim = c(0, 1), 
+         xlab = "No of people in group", ylab = "probability of fishing", 
+         main = "Prior distribution check (camper = 1)")
+    
+    for(i in 1:N)
+      curve(inv_logit(aP[i] + bC1[i]*camper + bP1[i] * x) , from = -5, to = 20, add = TRUE, col = grau())
+    
+  }
+)
+```
+
+Based on trial and error, we get the above flat priors that assign equal probability of fishing regardless of group size. 
+
+Similarly we perform prior check for the variables in Poisson. After using the exposure in the Poisson model, the rate is fishes caught per hour. We would expect max 20 fishes caught per hour. Setting the priors with the same idea:
+
+```{r fig.height=7}
+N <- 100
+aF  <- rnorm(N, 1, 0.3)
+bC2 <- rnorm(N, 0, 0.2)
+bP2 <- rnorm(N, 0, 0.2)
+
+withr::with_par(
+  list(mfrow = c(2, 1)),  
+  {
+    # first for no camper (camper = 0)
+    camper <- 0
+    plot(NULL, xlim = c(1, 20), ylim = c(0, 20), 
+         xlab = "No of people in group", ylab = "No of fishes caught", 
+         main = "Prior distribution check (camper = 0)")
+    
+    for(i in 1:N)
+      curve(exp(aF[i] + bC2[i]*camper + bP2[i] * x) , from = 1, to = 20, add = TRUE, col = grau())
+            
+    # first for no camper (camper = 1)
+    camper <- 1
+    plot(NULL, xlim = c(1, 20), ylim = c(0, 20), 
+         xlab = "No of people in group", ylab = "No of fishes caught", 
+         main = "Prior distribution check (camper = 1)")
+    
+    for(i in 1:N)
+      curve(exp(aF[i] + bC2[i]*camper + bP2[i] * x) , from = 1, to = 20, add = TRUE, col = grau())
+    
+  }
+)
+
+```
+
+We get mostly flat priors, with avg rate of fishes caught per hour mostly between 0-5, but allowing much higher growth. 
+
+### Modelling
+
+Modelling this:
+
+```{r results='hide'}
+dat_list <- list(
+  f = d$fish_caught, 
+  bait = d$livebait + 1, 
+  camper = d$camper, 
+  persons  = d$persons, 
+  child  = d$child, 
+  log_hours  = log(d$hours)
+)
+
+mh6 <- ulam(
+  alist(
+    f ~ dzipois(p, lambda), 
+    logit(p) <- aP + bC1*camper + bP1 * persons + bCH1*child, 
+    log(lambda) <- log_hours + aF[bait] + bP2 * persons + bC2*camper + bCH2 * child, 
+    aP ~ dnorm(0, 1), 
+    aF[bait] ~ dnorm(1, 0.3), 
+    c(bC1, bC2, bP1, bP2, bCH1, bCH2) ~ dnorm(0, 0.2)
+  ), data = dat_list, chains = 4, cmdstan = TRUE
+)
+```
+
+### Checking Posterior
+
+```{r}
+plot(precis(mh6, 2, pars = c("aP", "bC1", "bP1","bCH1",  
+                             "aF", "bC2", "bP2", "bCH2")))
+```
+
+Let's visualise the posterior predictions to understand these terms better. First let us look at the rate of fishing/working. 
+
+```{r fig.width=8}
+post <- extract.samples(mh6)
+
+persons_seq <- seq(1, 10)
+
+library(tidyr)
+preds <- crossing(bait = 1:2, 
+                  camper = 0:1, 
+                  child = c(0, 2, 5)) %>% 
+  # create combinations of above items
+  # bait is not needed for probability of fishing, but model requires it
+  # so we create it as well
+  mutate(id = row_number()) %>% 
+  nest(data = -id) %>% 
+  mutate(.preds = purrr::map(data, ~link(mh6, 
+                                               data = data.frame(persons = persons_seq,
+                                                                 bait = .$bait, 
+                                                                 camper = .$camper, 
+                                                                 child = .$child,
+                                                                 log_hours = 0))),
+         
+         # probability of not fishing
+         prob_fishing = purrr::map(.preds, ~.$p), 
+         
+         # find its mean and credible intervals
+         prob_mu   = purrr::map(prob_fishing, colMeans),         # mean
+         prob_ci   = purrr::map(prob_fishing, ~apply(., 2, PI)), # PI 
+         prob_low  = purrr::map(prob_ci, ~.[1,]),                # extract PI low
+         prob_high = purrr::map(prob_ci, ~.[2,]),                # extract PI high
+         
+         # predicted fishes caught
+         rate = purrr::map(.preds, ~.$lambda), 
+         rate_mu   = purrr::map(rate, colMeans), 
+         rate_ci   = purrr::map(rate, ~apply(., 2, PI)), 
+         rate_low  = purrr::map(rate_ci, ~.[1,]), 
+         rate_high = purrr::map(rate_ci, ~.[2,]), 
+         ) %>% 
+  select(-c(.preds, prob_fishing, prob_ci, rate, rate_ci)) %>% 
+  group_by(id) %>% 
+  mutate(persons = list(persons_seq)) %>% 
+  ungroup() %>% 
+  unnest(cols = everything()) %>% 
+  mutate(camper = factor(camper, labels = c("No Camper", "Camper")), 
+         child = factor(child), 
+         bait  = factor(bait, labels = c("No", "Yes")))
+
+preds %>% 
+  filter(bait == "No") %>% # since bait does not matter in our equation for prob_fishing
+  ggplot(aes(x = persons)) + 
+  geom_line(aes(y = prob_mu, colour = camper)) +
+  geom_ribbon(aes(ymin = prob_low, ymax = prob_high, fill = camper), alpha = 0.2) +
+  facet_wrap(~ child) + 
+  expand_limits(y = c(0, 1)) + 
+  scale_x_continuous(breaks = seq(1, 10, 3)) + 
+  labs(x = "No of adults in group", 
+       y = "Probability of not fishing", 
+       title = "Posterior predictions for probability of not fishing (taking break)", 
+       subtitle = "Facets represent number of children in group")
+```
+
+From the above we can see that the probability of fishing increases as number of adults in group increase (the probability above is the probability of generating zero, i.e. not fishing). Having or not having a camper makes no difference to this probability. With more children in the group, the prediction intervals increase (uncertainty increases) but the relationship is still the same. 
+
+Next, let us look at the posterior predictions for number of fishes caught. 
+
+```{r fig.height=7}
+d2 <- d %>% 
+  mutate(camper = factor(camper, labels = c("No Camper", "Camper")), 
+         child = factor(child), 
+         bait  = factor(livebait, labels = c("No", "Yes"))) %>% 
+  filter(child %in% c(0, 2, 5)) %>% 
+  mutate(child = sprintf("children = %s", child))
+  
+
+preds %>% 
+  mutate(child = sprintf("children = %s", child)) %>% 
+  ggplot(aes(x = persons)) + 
+  geom_line(aes(y = rate_mu, colour = bait)) + 
+  geom_ribbon(aes(ymin = rate_low, ymax = rate_high, fill = bait), alpha = 0.2) + 
+  facet_grid(child ~ camper) + 
+  scale_x_continuous(breaks = seq(1, 10, 3)) + 
+  coord_cartesian(clip = "on", ylim = c(0, 50)) + 
+  geom_point(aes(y = fish_caught), data = d2) + 
+  labs(x = "No of adults in group", 
+       y = "Rate of fishes caught", 
+       fill = "Bait used?", 
+       colour = "Bait used?", 
+       title = "Posterior predictions for rate of fishes caught", 
+       subtitle = "Facets represent number of children in group + presence/absence of camper")
+```
+
+Inference from model - 
+
+- Model expects an explosive growth in number of fishes caught with even number of people in group even approaching 10
+- Having a camper reduces the number rate of fishes caught
+- Having a bait increases the changes of fishes caught
+- Having more children in group increases uncertainty of results
+
+Another way to look at the model is to look at model's simulated counts for counterfactual data. 
+
+```{r fig.height=7, fig.width=8}
+# Create data with combinations of below items
+preds2 <- crossing(bait = 1:2, 
+                   camper = 0:1, 
+                   child = c(0, 2, 5), 
+                   persons = c(1, 3, 5, 7)) %>% 
+    mutate(id = row_number()) %>% 
+    nest(data = -id) %>% 
+    mutate(.preds = purrr::map(data, ~sim(mh6,  # simulate counts
+                                          data = data.frame(persons = .$persons,
+                                                            bait = .$bait, 
+                                                            camper = .$camper, 
+                                                            child = .$child,
+                                                            log_hours = 0))))
+
+# Plot histograms for above data
+preds2 %>% 
+    unnest(c(data, .preds)) %>% 
+    mutate(camper = factor(camper, labels = c("No Camper", "Camper")), 
+           child = factor(child), 
+           bait  = factor(bait, labels = c("No", "Yes"))) %>% 
+    mutate(child = sprintf("child = %s", child), 
+           persons = sprintf("adult = %s", persons)) %>% 
+    ggplot(aes(x = .preds)) + 
+    geom_bar(aes(fill = bait), alpha = 1, position = "dodge") + 
+    facet_grid(child ~ persons) + 
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 3)) +
+    coord_cartesian(xlim = c(0, 10)) + 
+    labs(x = "Fishes caught", 
+         y = "Frequency!~", 
+         fill = "Bait used?", 
+         title = "Simulated fishes caught from model")
+```
+
+We can again see that with less adults we expect to catch less fishes (count of fishes caught is almost around 0). 
+
+Having bait helps catch more fish. 
+
+With children the result is not so clear from this plot. It might seem that having more children spreads the count, but the result varies with number of adults. 
+
+## 12H7
+> In the trolley data—data(Trolley)—we saw how education level (modeled as an ordered category) is associated with responses. But is this association causal? One plausible confound is that education is also associated with age, through a causal process: People are older when they finish school than when they begin it. Reconsider the Trolley data in this light. Draw a DAG that represents hypothetical causal relationships among response, education, and age. Which statical model or models do you need to evaluate the causal influence of education on responses? Fit these models to the trolley data. What do you conclude about the causal relationships among these three variables?
+
+Loading in data
+
+```{r}
+library(rethinking)
+data("Trolley")
+d <- Trolley
+```
+
+We are assuming that `age` influences both `education` and `response`. We have the following dag:
+
+```{r}
+library(dagitty)
+trolley_dag <- dagitty("dag{
+                       age -> response <- education
+                       age -> education
+}")
+
+coordinates(trolley_dag) <- list(
+    x = c(age = 0, education = 0, response = 1), 
+    y = c(age = 0, education = 1, response = 1)
+)
+
+drawdag(trolley_dag)
+```
+
+For finding out the effect of education on response, we will need to include age as well, since it has a backdoor into education. We can confirm this via the command from `dagitty`:
+
+```{r}
+adjustmentSets(trolley_dag, exposure = "education", outcome = "response")
+```
+
+We will use the same model as from the chapter and add age as a predictor (age is continuous in the dataset):
+
+\begin{align}
+R_i &\sim \text{Ordered-Logit} (\phi_i, \kappa) \\
+\phi_i &= \beta_E \sum_{j=0}^{E_i - 1} \delta_j + \beta_A A_i + \beta_i I_i + \beta_C C_i + \beta_{age} \text{Age} \\
+
+\text{Priors}&: \\
+
+\kappa_K &\sim \text{Normal}(0, 1.5) \\
+\beta_A, \beta_I, \beta_C, \beta_E, \beta_{age} &\sim Normal(0, 1) \\
+\delta &\sim \text{Dirichlet}(\alpha)
+
+\end{align}
+
+Modelling the same:
+
+```{r}
+edu_levels <- c( 6 , 1 , 8 , 4 , 7 , 2 , 5 , 3 )
+d$edu_new  <- edu_levels[d$edu]
+dat <- list(
+    R = d$response, 
+    action = d$action, 
+    intention = d$intention, 
+    contact = d$contact, 
+    E = as.integer(d$edu_new),    # edu_new as an index
+    age = d$age, 
+    alpha = rep(2, 7)
+)
+```
+
+
+```{r eval = FALSE}
+mh7 <- ulam(
+    alist(
+        R ~ ordered_logistic(phi, kappa), 
+        phi <- bE*sum(delta_j[1:E]) + bA*action + bI*intention + bC*contact  + bAge*age, 
+        kappa ~ normal(0, 1.5), 
+        c(bA, bI, bC, bE, bAge) ~ normal(0, 1), 
+        vector[8]: delta_j <<- append_row(0, delta), 
+        simplex[7]: delta ~ dirichlet(alpha)
+    ), data = dat, chains = 4, cores = 4, iter = 2000, cmdstan = TRUE, 
+    start = list(cutpoints = c(-2, -1, 0, 1, 2, 2.5))
+)
+```
+
+
+```{r echo=FALSE}
+load("mh7.rdata")
+```
+
+Let's look at the posterior means:
+
+```{r}
+plot(precis(mh7, depth = 2, omit = "kappa"))
+```
+
+The sign of education has changed from positive to negative! (-0.30 in the text) This implies that more educated people actually approve the stories more! 
+
+Age seems to have no direct affect after taking into account education from the posterior means. 
+
+Let's do a posterior predictive check:
+
+```{r eval=FALSE, echo = FALSE}
+append_row <- function(x, y) cbind(x, y)
+
+f <- mh7@formula_parsed$link_funcs$phi$func
+f1 <- str2lang("bE * sum(delta_j[1:E[i]]) + bA * action[i] + bI * intention[i] + bC * contact[i] + bAge * age[i]")
+
+mh7@formula_parsed$link_funcs$phi$func <- f1
+
+# vector of length 36
+age_seq <- seq(10, 80, 2)
+
+post <- extract.samples(mh7)
+
+test_data <- list(age = age_seq, action = 0, intention = 0, contact = 1, E = 1, alpha = rep(2, 7))
+preds <- link(mh7, data = test_data)
+```
+
+Unfortunately the code for `link` fails for this model, since there are [some issues](https://github.com/rmcelreath/rethinking/issues/306) with the implementation of `link` for ordered predictors. 
+
+Creating model with `brms` (high level interface to stan). 
+
+```{r results = "hide"}
+library(brms)
+mh7_2 <- 
+  brm(data = d, 
+      family = cumulative,
+      response ~ 1 + action + contact + intention + age + mo(edu_new),  # note the `mo()` syntax
+      prior = c(prior(normal(0, 1.5), class = Intercept),
+                prior(normal(0, 1), class = b),
+                
+                prior(normal(0, 0.143), class = b, coef = moedu_new),
+                
+                prior(dirichlet(2, 2, 2, 2, 2, 2, 2), class = simo, coef = moedu_new1)),
+      iter = 2000, warmup = 1000, cores = 4, chains = 4,
+      seed = 12,
+      file = "mh7_2", backend = "cmdstanr")
+```
+
+Checking the posterior distribution:
+```{r}
+summary(mh7_2)
+```
+
+We get similar results (the output style is different). The effect of education might seem less, but that is because for ordinal predictors (like we have education here), the $\beta_E$ term represents the average difference between the classes instead of the maximum effect. The maximum effect is the coefficient times the number of classes `moedu_new` * 7 = 0.21, which is closer to what we get with `ulam`. 
+
+
+Let us now plot some counterfactuals to understand the model. 
+
+```{r fig.width=8, fig.height=7}
+library(tidyr)
+
+# vector of length 36
+age_seq <- seq(10, 80, 2)
+
+
+# create test data with all combinations
+test_data <- crossing(action = 0:1, intention = 0:1, contact = 0:1) %>% 
+    slice(-c(6, 8)) %>% # not all combinations of action, intention and contact are all possible (action & contact are mutually exclusive)
+    crossing(age = age_seq, edu_new = 1:8)
+
+# test_data <- crossing(age = age_seq, action = 0:1, intention = 0:1, contact = 1, edu_new = 1)
+
+# the output of `fitted` below is a [sample_size * 4 (output_col) * 7 (classes)]
+# the output contains Estimate, Est.Error, Q2.5 and Q97.5
+
+# bind original test_data with the fitted values after converting fitted to data.frame
+preds <- bind_cols(mutate(test_data, id = row_number()), 
+                   fitted(mh7_2, newdata = test_data, summary = TRUE) %>% 
+                     as.data.frame()) %>% 
+  
+    # cleaner names (. to _, lower case, etc.)
+    janitor::clean_names() %>% 
+  
+    # after converting to data frame we get the above mentioned 4
+    # columns for each of the 7 class, converting those 28 variables 
+    # to again 4 columns - `response` 1-7, Estimate, Error, Q2.5 and Q97.5
+    pivot_longer(cols = -(action:id), 
+                 names_to = c(".value", "response"), 
+                 names_pattern = "(.*)(\\d)") %>% 
+    group_by(id) %>% 
+    arrange(response) %>% 
+    mutate(cum_prob = cumsum(estimate_)) %>% # compute cumulative probability for all classes 
+    ungroup()
+
+# to map categories from numbers to names
+# could have just left it as categories themselves in the beginning
+edu_map <- c("Elementary School" = 1,
+             "Middle School"= 2,
+             "Some High School"= 3,
+             "High School Graduate"= 4,
+             "Some College"= 5,
+             "Bachelor’s Degree"= 6,
+             "Master’s Degree"= 7,
+             "Graduate Degree" = 8)
+
+(p1 <- filter(preds, action == 0, response != 7) %>% 
+        mutate(education = names(edu_map[edu_new])) %>% 
+        mutate(education = forcats::fct_inorder(education)) %>% 
+        ggplot(aes(x = age, y = cum_prob, colour = response)) + 
+        geom_hline(yintercept = c(0.25, 0.8), linetype = "dashed") +
+        geom_line(size = 2) + 
+        facet_grid(intention + contact ~ education, 
+                   labeller = labeller(.rows = label_both, .cols = label_wrap_gen(15))) + 
+        # theme_classic() +
+        scale_y_continuous(labels = scales::percent) + 
+        scale_colour_brewer(palette = "Dark2") + 
+        labs(x = "Age", 
+             y = "Cumulative Probability", 
+             colour = "Response", 
+             title = "Posterior predictions for the effect of age + education + contact/intention -> Response") + 
+        theme_gray(base_size = 9) + 
+        theme(panel.spacing.y = unit(1, "lines"), panel.grid = element_blank(), 
+              panel.background = element_rect(fill = "white"), 
+              legend.position = "bottom")
+        )
+```
+
+In the above graph, we have plotted almost all combinations (except for action which is set to 0 in all these cases). In general, across the different combinations of the predictors we can see that with increasing age cumulative probability for all categories increases, implying acceptability of stories decreases. 
+
+For education, the effect seems to be much less and in the positive direction, i.e. acceptability seems to increase with increasing education. The effect is very less and difficult to see. 
+
+A horizontal dashed line at 80% is drawn to easily compare these. If we look at the first row of plots (contact = 0, intention = 0), the line for response = 6 crosses this horizontal line for Elementary School education, but falls short at the highest education level (Graduate Degree). This implies increasing acceptability. For instance, for elementary school educated people of age = 80, $Pr(y \le 6) > 80\%$ while for people with Graduate Degree and age = 80, $Pr(y \le 6) < 80\%$. So there are more Graduate Degree holders who rate the story 7 compared to only Elementary school educated people. We can probably extend similar inferences for the other classes. Another dashed line at 25% probability is drawn to ease this comparison. 
+
+Also, once again we also see that the presence of contact and intention decreases the acceptability of stories. 
+
+Overall, we do see that age was the confounding factor in our previous analysis. Though I have no idea why we get a coefficient for age equal to zero but much more importance in predicted results. 
+
+Lastly we draw the histogram plot for the same:
+
+```{r fig.width = 8, fig.height=7}
+# brms equivalent of `sim` from rethinking
+sim_count <- predict(mh7_2, newdata = test_data, nsamples = 1000, scale = "response", summary = FALSE)
+# here we get a matrix of 1000 (sample_size) x 1728 (test_data_size)
+# so essentially for each row in test_data, we get 1000 different counts
+
+# data wrangling
+sim_count %>%           
+    t() %>%          # transpose (1728 x 1000 now, so rows represent input data, cols = simulated counts)
+    as.data.frame() %>%             # convert to data.frame
+    mutate(id = row_number()) %>%   # add row_id to later add columns from test_data
+    
+    # convert 1000 columns to key_value pair of just 2 columns
+    # row_id sample_id sample_simulated_response
+    
+    pivot_longer(cols = -id, 
+                 names_to = 'sample', 
+                 names_prefix = "V", 
+                 names_transform = list(sample = as.integer),
+                 values_to = 'response') %>% 
+    
+    # join with test_data
+    left_join(mutate(test_data, id = row_number())) %>% 
+    
+    # since we are drawing histograms, limit age to just a couple of values
+    filter(age %in% c(10, 80), action == 0) %>% 
+    
+    # convert age to factor for plotting
+    mutate(age = factor(age)) %>% 
+    
+    # add education category and put in right order
+    mutate(education = names(edu_map[edu_new])) %>% 
+    mutate(education = forcats::fct_inorder(education)) %>% 
+    
+    # plot
+    ggplot(aes(response, fill = age)) + 
+    geom_bar(position = "dodge", width = 0.5) + 
+    facet_grid(contact + intention ~ education, 
+               labeller = labeller(.rows = label_both, .cols = label_wrap_gen(15))) + 
+    scale_x_continuous(breaks = 1:7) + 
+    scale_fill_brewer(palette = "Dark2") + 
+    labs(x = "Response", 
+         y = "Frequency", 
+         title = "Posterior simulations", 
+         fill = "Age") + 
+    theme_gray(base_size = 9) + 
+    theme(panel.grid = element_blank(), 
+          panel.background = element_rect(fill = "white"), 
+          legend.position = "bottom")
+```
+
+We again see similar results, with increasing age, acceptability decreases, which can be seen in the higher frequencies of lower response levels for the higher age category. 
+
+
+## 12H8
+> Consider one more variable in the trolley data: Gender. Suppose that gender might influence education as well as response directly. Draw theDAGnow that includes response, education, age, and gender. Using only the DAG, is it possible that the inferences from 12H7 above are confounded by gender? If so, define any additional models you need to infer the causal influence of education on response. What do you conclude?
+
+Load in the library and data
+
+```{r}
+library(rethinking)
+data("Trolley")
+d <- Trolley
+```
+
+```{r}
+library(dagitty)
+trolley_dag <- dagitty("dag{
+                       age -> response <- education
+                       age -> education
+                       response <- gender -> education
+                       
+}")
+
+coordinates(trolley_dag) <- list(
+    x = c(age = 0, education = 0, response = 1, gender = 0), 
+    y = c(age = 1, education = 0, response = 0, gender = -1)
+)
+
+drawdag(trolley_dag)
+```
+
+Gender also has a backdoor to education. We will need to include gender as well to find the effect of education onto response. 
+
+```{r}
+adjustmentSets(trolley_dag, exposure = "education", outcome = "response")
+```
+
+We will add gender as a predictor to the model from `12H7` and use the dummy variable approach. The gender variable in the data is named "Male" and represents 1 - Male, 0 - Female.  
+
+\begin{align}
+R_i &\sim \text{Ordered-Logit} (\phi_i, \kappa) \\
+\phi_i &= \beta_E \sum_{j=0}^{E_i - 1} \delta_j + \beta_A A_i + \beta_i I_i + \beta_C C_i + \beta_{age} \text{Age} + \beta_M \text{Male} \\
+
+\text{Priors}&: \\
+
+\kappa_K &\sim \text{Normal}(0, 1.5) \\
+\beta_A, \beta_I, \beta_C, \beta_E, \beta_{age} &\sim Normal(0, 1) \\
+\delta &\sim \text{Dirichlet}(\alpha)
+
+\end{align}
+
+Modelling the same:
+
+```{r}
+d$edu <- forcats::fct_relevel(d$edu, 
+                              "Elementary School", 
+                              "Middle School", 
+                              "Some High School", 
+                              "High School Graduate", 
+                              "Some College", 
+                              "Bachelor's Degree", 
+                              "Master's Degree",
+                              "Graduate Degree" 
+                              )
+edu_levels <- c( 6 , 1 , 8 , 4 , 7 , 2 , 5 , 3 )
+d$edu_new  <- edu_levels[d$edu]
+```
+
+Modelling via `brms` again since there are issues with using `link` and `sim` with {rethinking}.
+
+```{r results = "hide"}
+library(brms)
+mh8 <- 
+  brm(data = d, 
+      family = cumulative,
+      response ~ 1 + action + contact + intention + age + male + mo(edu_new),  
+      prior = c(prior(normal(0, 1.5), class = Intercept),
+                prior(normal(0, 1), class = b),
+                prior(normal(0, 0.143), class = b, coef = moedu_new),
+                prior(dirichlet(2, 2, 2, 2, 2, 2, 2), class = simo, coef = moedu_new1)),
+      iter = 2000, warmup = 1000, cores = 4, chains = 4,
+      seed = 12,
+      file = "mh8", backend = "cmdstanr")
+```
+
+Let's look at the posterior means:
+
+```{r}
+summary(mh8)
+```
+
+From the above, the effect of education `moedu_new` is again negative as before. With `brms`, the moedu_new represents the average difference between the classes, and the total effect size is `moedu_new x 7` = -0.28. 
+
+Our coefficient for `male` is also positive and with a narrow interval around 0.55, implying males on average find stories more acceptable than females. 
+
+Let's do a posterior predictive check. 
+
+```{r fig.width = 8, fig.height=7}
+# vector of length 36
+age_seq <- seq(10, 80, 2)
+
+
+# create test data with all combinations
+test_data <- crossing(action = 0:1, intention = 0:1, contact = 0:1) %>% 
+    slice(-c(6, 8)) %>% 
+    crossing(age = age_seq, edu_new = 1:8, male = 0:1)
+
+preds <- bind_cols(mutate(test_data, id = row_number()), 
+                   fitted(mh8, newdata = test_data, summary = TRUE) %>% 
+                     as.data.frame()) %>% 
+  
+    # cleaner names (. to _, lower case, etc.)
+    janitor::clean_names() %>% 
+  
+    # after converting to data frame we get the above mentioned 4
+    # columns for each of the 7 class, converting those 28 variables 
+    # to again 4 columns - `response` 1-7, Estimate, Error, Q2.5 and Q97.5
+    pivot_longer(cols = -(action:id), 
+                 names_to = c(".value", "response"), 
+                 names_pattern = "(.*)(\\d)") %>% 
+    group_by(id) %>% 
+    arrange(response) %>% 
+    mutate(cum_prob = cumsum(estimate_)) %>% # compute cumulative probability for all classes 
+    ungroup()
+
+# to map categories from numbers to names
+# could have just left it as categories themselves in the beginning
+edu_map <- c("Elementary School" = 1,
+             "Middle School"= 2,
+             "Some High School"= 3,
+             "High School Graduate"= 4,
+             "Some College"= 5,
+             "Bachelor’s Degree"= 6,
+             "Master’s Degree"= 7,
+             "Graduate Degree" = 8)
+
+(p3 <- filter(preds, action == 0, 
+              response != 7, 
+              # contact == 1, 
+              intention == 0) %>% 
+        mutate(education = names(edu_map[edu_new])) %>% 
+        mutate(education = forcats::fct_inorder(education), 
+               male = factor(male, labels = c("female", "male"))) %>% 
+        
+        # plot
+        ggplot(aes(x = age, y = cum_prob, colour = response, linetype = male)) + 
+        geom_hline(yintercept = c(0.25, 0.5, 0.8), linetype = "dashed") +
+        geom_line(size = 1.5) + 
+        facet_grid(contact ~ education, 
+                   labeller = labeller(.rows = label_both, .cols = label_wrap_gen(15))) + 
+        scale_y_continuous(labels = scales::percent) + 
+        guides(linetype = guide_legend(override.aes = list(size = 1))) + 
+        scale_colour_brewer(palette = "Dark2") + 
+        labs(x = "Age", 
+             y = "Cumulative Probability", 
+             colour = "Response", 
+             linetype = "Gender",
+             title = "Posterior predictions for the effect of age + educaton + gender -> Response", 
+             subtitle = "Action = 0, Contact = 1, intention = 0") + 
+        theme_gray(base_size = 9) + 
+        theme(panel.spacing.y = unit(1, "lines"), 
+              panel.grid = element_blank(), 
+              legend.position = "bottom", 
+              panel.background = element_rect(fill = "white"))
+        )
+```
+
+The effect of education is much more pronounced now, and the acceptability of stories decreases with increasing education. Age still has the same effect, increasing age leads to more disapproval. 
+
+The effect of gender is also clearly visible. Males disapprove less of stories. The dashed lines represent probability of acceptability by males. All these lines are lower than the solid lines representing females, implying females tend to attach more prob mass towards the lower response levels. The effect is more pronounced in case of contact in story. 
+
+Let us also simulate the counts and draw a histogram. 
+
+
+```{r fig.width = 8, fig.height=7}
+sim_count <- predict(mh8, newdata = test_data, nsamples = 1000, scale = "response", summary = FALSE)
+
+# data wrangling
+sim_data <- sim_count %>%           
+    t() %>%          
+    as.data.frame() %>%        
+    mutate(id = row_number()) %>% 
+    
+    pivot_longer(cols = -id, 
+                 names_to = 'sample', 
+                 names_prefix = "V", 
+                 names_transform = list(sample = as.integer),
+                 values_to = 'response') %>% 
+    
+    # join with test_data
+    left_join(mutate(test_data, id = row_number())) %>% 
+    
+    # since we are drawing histograms, limit age to just a couple of values
+    filter(age %in% c(10, 80), action == 0) %>% 
+    
+    # convert age to factor for plotting
+    mutate(age = factor(age)) %>% 
+    
+    # add education category and put in right order
+    mutate(education = names(edu_map[edu_new])) %>% 
+    mutate(education = forcats::fct_inorder(education))  
+    
+sim_data %>% 
+    mutate(action = factor(action), 
+           intention = factor(intention), 
+           contact = factor(contact), 
+           male = factor(male, labels = c("Female", "Male"))) %>% 
+    filter(
+        # contact == 1, 
+           intention == 0) %>% 
+    ggplot(aes(response, fill = male)) + 
+    geom_bar(position = "dodge", width = 0.5) + 
+    facet_grid(age + contact ~ education, 
+               labeller = labeller(.rows = label_both, .cols = label_wrap_gen(15))) + 
+    scale_x_continuous(breaks = 1:7) + 
+    scale_fill_brewer(palette = "Dark2") + 
+    labs(x = "Response", 
+         y = "Frequency", 
+         title = "Posterior simulations", 
+         subtitle = "Action = 0, Contact = 1, Intention = 0", 
+         fill = "Gender") + 
+    theme_gray(base_size = 9) + 
+    theme(legend.position = "bottom", 
+          panel.grid = element_blank(), 
+          panel.background = element_rect(fill = "white"))
+```
+
+We can again see all the previous effects. 
+
+- Females have more responses on the lower categories (<=4) while males have more frequency of responses towards the higher responses. Females find the stories less acceptable than males
+- Increasing age leads to less acceptability
+- Increasing education also reduces acceptability of stories
+

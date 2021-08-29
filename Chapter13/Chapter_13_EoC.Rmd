@@ -1,0 +1,24 @@
+---
+title: "Statistical Rethinking Chapter 13 End of Chapter Questions"
+output:
+  # prettydoc::html_pretty:
+  #   theme: architect
+  #   highlight: github
+  rmdformats::readthedown:
+    gallery: true
+    self_contained: true
+    lightbox: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error = FALSE, cache = TRUE)
+library(rstan)
+rstan_options(auto_write = TRUE)
+Sys.setlocale(locale = "Chinese")
+```
+
+# Easy Questions
+
+## 12E1
+> 

@@ -1,0 +1,1117 @@
+---
+title: "Statistical Rethinking Chapter 13"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    lightbox: true
+    gallery: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	error = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	cache = TRUE,
+	dev = "ragg_png",
+	dpi = 150
+)
+library(rstan)
+rstan_options(auto_write = TRUE)
+Sys.setlocale(locale = "Chinese") # for precis histograms
+```
+
+This chapter is about **MULTILEVEL MODELS**. If there are clusters in the dataset, then these models remeber features of each cluster as they learn about all clusters and pools the info across clusters. The pooling improves estimates about each cluster. Some of the benefits arising out of this are:
+
+1. **Improved estimates for repeat sampling** - If there are more than one obs per group/individual/entity, then single level models under/over fit the data. 
+2. **Improved estimates for imbalance in sampling** - If there are more samples for one entity compared to another, multilevel models can work with the differing uncertainty across the clusters, preventing over-sampled clusters from unfairly dominating inference. 
+3. **Estimates of variation** - When there is variation among individuals/groups within the data, then multilevel models are better since they can model variation explicitly. 
+4. **Avoid averaging, retain variation** - Pre-averaging some data to construct variables can remove variation thereby showcasing false confidence and introduce arbitrary data tranformations. Multilevel models allow us to preserve teh uncertainty and avoid data transformations. 
+
+
+**Costs of Multilevel models**
+
+- We have to make new assumptions including defining the distributions for defining clusters. Conservative Max entropy distributions are helpful here.
+- New estimation challenges (MCMC is helpful here)
+- Can be hard to understand since they make predictions at different levels of the data
+
+# Example: Multilevel Tadpoles
+
+We will look at experiments regarding Reed frog tadpole mortality. 
+
+```{r}
+library(rethinking)
+data(reedfrogs)
+d <- reedfrogs
+str(d)
+```
+
+We will be interested in the following:
+
+- `surv` - number surviving
+- `density` - initial count or rather tadpole density in a 1.2 x 0.8 x 0.4 m tank
+
+Each row in the data can be thought of as a tank with its own idiosyncracies resulting in different number of survival for the same value of predictors. These tanks are an example of __cluster__ variable, with multiple tadpoles within each cluster. 
+
+Thus we have repeat measures and heterogeneity across clusters. If we ignore these clusters and assign the same intercept to all, then we risk ignoring important variation in baseline survival. __This variation could mask association with other variables__. If we use dummy variables for tanks then the information from one tank is not used for the others. 
+
+In a multilevel model, we will simultaneously estimate both an intercept for each tank as well as the variation among tanks. This will be a **VARYING INTERCEPTS** model. We will thus have a unique intercept parameter for each cluster in the data. However, unlike the models discussed until now, we will adaptively learn the prior that is common to all these intercepts. Whatever is learned from one cluster informs all the other clusters. 
+
+## Modelling using strategies from earlier chapters
+
+Using the approach of earlier chapters, we can create a model for predicting tadpole mortality in each tank, using the regularising priors of earlier chapters:
+
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} \qquad & \text{unique log-odds for each intercept} \\
+\alpha_j &= \text{Normal}(0, 1.5) \qquad  & \text{for j = 1..48}
+\end{align}
+
+
+This can be approximated using `ulam` as in previous chapters:
+
+```{r results='hide'}
+# make the tank cluster variable
+d$tank <- 1:nrow(d)
+
+dat <- list(
+    S = d$surv, 
+    N = d$density, 
+    tank = d$tank
+)
+
+# approximate the posterior
+m13.1 <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank], 
+        a[tank] ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+```
+
+If we look at the posterior, we get 48 different intercepts for each tank, which we can transform to probability of surviving using inverse logit transformation. 
+
+```{r}
+precis(m13.1, 2)
+```
+
+## Multilevel approach
+
+Now we will use the multilevel model, which adaptively pools information across tanks. To enable adaptive pooling, we need to make the prior for the `a` parameters a function of some new paramters. Here is the multilevel model in mathematical form:
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} \\
+\alpha_j &\sim \text{Normal} (\color{blue}{\bar \alpha, \sigma}) &\text{[adaptive prior]} \\
+\color{blue}{\bar \alpha} &\color{blue}{\sim \text{Normal}(0, 1.5)} &\text{[prior for average tank]} \\
+\color{blue}{\sigma} & \color{blue}{\sim \text{Exponential}(1)}  &\text{[prior for standard deviation of tanks]}
+\end{align}
+$$
+
+Now the prior for the intercepts is a function of two paramters, $\bar \alpha$ and $\sigma$. These two paramters inside the prior lead to the "multi" in multilevel model. The Gaussian distribution with mean $\bar \alpha$ and $\sigma$ defines the distribution for the priors of intercepts, but this prior itself has its own priors for each parameter. Thus we have two levels in the model each resembling a simpler model:
+
+- Top level - outcome is S, params are the vector $\alpha$ and the prior is $\alpha_j \sim \text{Normal}(\bar \alpha, \sigma)$
+- second level - the vector of intercept params $\alpha$ is the "outcome", $\bar \alpha$ and $\sigma$ are the params and they have their priors - $\alpha \sim \text{Normal}(0, 1.5)$ and $\sigma \sim \text{Exponential}(1)$
+
+The two params $\bar \alpha$ and $\sigma$ are often referred to as **HYPERPARAMETERS**, since they are parameters for parameters. And their priors are often called **HYPERPRIORS**. Technically there is no limit to the number of levels we can have in a model. However, practically we are limited by computation and our ability to understand the model. 
+
+> Why Gaussian Tanks? 
+The Gaussian assmptions is easy to work with and extends easily to more than one dimension. Another reason is **entropy**. Gaussian is the most conservative assumption if we can only speak about the mean and variance of a distribution. A Gaussian does not force the resulting posterior to be symmetric or bell shaped. The only info in a Gaussian prior is finite variance. 
+
+This model cannot be fit with `quap`, since now, the probability of data must average over the level 2 params while `quap` only "hill climbs" using static values for all of the params without being able to see the levels. Since the prior itself is a function of params, there are two levels of uncertainty. Thus the Pr(data | params) must average over each level and this is not possible using a direct analytical solution. 
+
+We can fit it with `ulam`. 
+
+```{r results='hide'}
+m13.2 <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank], 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+```
+
+This model provides posterior distributions for 50 params, the 48 per tank intercepts plus the overall sample intercept $\bar \alpha$ and the standard deviation among tanks $\sigma$. We can use WAIC to see the effective number of params. 
+
+```{r}
+compare(m13.1, m13.2)
+```
+
+The multileve model has only 21 effective params. There are 28 fewer effective params since the prior assigned to each intercept shrinks them all towards the mean $\bar \alpha$. The prior is reasonbly strong in this case. 
+
+```{r}
+precis(m13.2)
+```
+
+The mean of `sigma` is 1.6. This is a regularizing prior similar to the one used in previous chapters, however, this time this was learnt from the data itself. There is still uncertainty about the regularisation. This model isn't the same as one with a regualarising prior with a constant sd of 1.6. Instead the intercepts for each tank average over the uncertainty in $\sigma$ and $\bar \alpha$. 
+
+Also the effective number of params for `m13.2` is less than `m13.1` even though it has 2 extra params in actual. This is because the two extra params allow it to learn a more aggressive regularising prior to adaptively regularise resulting in a less flexible prior and fewer effective params. 
+
+We can see the impact of this regularisation by plotting the posterior means from the two models. 
+
+## Comparing posterior means
+
+```{r}
+# extract Stan samples
+
+post <- extract.samples(m13.2)
+
+# compute mean intercept for each tank
+# also transform to prob with logistic
+
+d$propsurv.est <- logistic(colMeans(post$a))
+
+# display raw proportions surviving in each tank 
+plot(d$propsurv, ylim = c(0, 1), pch = 16, xaxt = "n", 
+     xlab = "tank", ylab = "proportion survival", col = rangi2)
+axis(1, at = c(1, 16, 32, 48), labels = c(1, 16, 32, 48))
+
+# overlay posterior means
+points(d$propsurv.est)
+
+# mark posterior mean probability across tanks
+abline(h = mean(inv_logit(post$a_bar)), lty = 2)
+
+# draw vertical dividiers between tank densities
+abline(v = 16.5, lwd = 0.5)
+abline(v = 32.5, lwd = 0.5)
+text(8, 0, "small tanks")
+text(16 + 8, 0, "medium tanks")
+text(32 + 8, 0, "large tanks")
+```
+
+- X-axis shows the tank index (1 to 48). 
+- Y-axis is the proportion of survivors in a tank. 
+- Filled blue points show the raw proportions, computed from the observed counts (present in data in `propsurv` column)
+- black circles are instead the varying intercepts
+- horizontal dashed line at about 0.8 is the estimated median survival proportion in the population of tanks $\alpha$. This is not the empirical median survival. 
+- the vertical lines divide tanks with different initial counts of tadpoles - 10 (left), 25 (middle) and 35 (right) (from `density` column)
+
+Few things to notice:
+
+- In every case, the multilevel estimate (the open circles) are closer to the dashed line than the raw proportions. This is **SHRINKAGE** resulting from regularisation. 
+- estimates for smaller tanks have shrunk farther from the raw proportions. The shrinkage decreases as we move to medium and large tanks. Varying intercepts for the clusters with smaller sample sizes shrink more
+- Points far away from the dashed line (est median survival proportion) have greater distance between the multilevel estimate and raw proportion. Shrinkage is stronger the further a tank's empirical proportion is from the global average $\alpha$. 
+
+The above three phenomenon arise from a common cause: **pooling** info across clusters (tanks) to improve estiamtes. Pooling here means that each tank provides info that can be used to improve the estimates for all the other tanks. Info from each tank helps because we made an assumption about how the varying log-odds in each tank related to all of the others. We assumed a distribution, the normal distribution in this case. The distributional assumption can be used with Bayes' theorem to optimally share info among the clusters. 
+
+## Inferred population distribution of survival
+
+This can be visualised by sampling from the posterior distribution as usual. We will do the following:
+
+- We will plot 100 Gaussian distributions, one for each of the first 100 samples from the posterior distribution of both $\alpha$ and $\sigma$.
+- sample 8k new log-odds of survival for each individual tank resulting in a posterior distribution of variation in survival in the population of tanks
+
+```{r fig.width=8}
+withr::with_par(
+    list(mfrow = c(1, 2)), 
+    code = {
+        # show first 100 populations in the posterior
+        plot(NULL, xlim =c(-3, 4), ylim = c(0, 0.35), 
+             xlab = "log-odds survive", ylab = "Density")
+        
+        for(i in 1:100)
+            curve(dnorm(x, post$a_bar[i], post$sigma[i]), add = TRUE, col = col.alpha('black', 0.2))
+        mtext("100 Gaussian distributions of the log-odds of \nsurvival sampled from the posterior")
+        
+        # sample 8000 imaginary tanks from the posterior distribution
+        sim_tanks <- rnorm(8000, post$a_bar, post$sigma)
+        
+        # transform to probability and visualise
+        dens(inv_logit(sim_tanks), lwd = 2, adj = 0.1)
+        mtext("Survival probs for 8k new simulated tanks \n averaging over the posterior distribution on the left")
+        
+    }
+)
+```
+
+There is uncertainty about both the location $\alpha$ and scale $\sigma$ of the population distribution of log-odds of survival. This uncertainty is propagated into the simulated probabilities of survival. 
+
+### Rethinking: Varying intercepts as over-dispersion
+
+Just like the beta-binomial and gamma-Poisson were methods to accommodate over-dispersion of count data, varying intercepts also account for over-dispersion by assigning a unique intercept to each observation and then pooling the intercepts through a common intercept. The predictions again expect over-dispersion just like the beta-binomial and gamma-Poisson. Multilevel models are also mixtures, but compared to the other two easier to estimate and extend. 
+
+### Overthinking: Priors for variance components [sigma]
+
+Weakly regularising priors have been used so far for $\sigma$ which estimate the variation across clusters in the data and they work well in regular multilevel modelling. However, they can be problematic in two situations:
+
+- Less number of clusters (less data to estimate variance from) - we might thus need more informative priors
+- In non-linear models with logit and log links, floor and ceiling effects can render extreme values of the variance equally plausible as more realistic values (The trace plots for such case may show wild swings around very large values). This happens since the exponential has a long tail. The chains may still sample validly but might be highly inefficient with low n_eff values and many divergent transitions. 
+
+To improve such models we can instead use a half-Normal priors or some other with a thin tail. A half-normal is a normal distribution with probability mass only above zero. It is just cut-off below zero. 
+
+Inside `ulam` we can use `dhalfnorm` to achieve the same. Inside a stan model we can also assing the parameter a lower bound of zero. 
+
+# Varying effects and the underfitting / overfitting trade-off
+
+A varying effect estimate provides more accurate estimates of the individual cluster means (intercepts) than raw empirical estimates. This is because they do a better job of trading off underfitting and overfitting. 
+
+The reed frog example will be used to explain this. We will assume that instead of experimental, we had natural ponds and we might be interested in making predictions about future for the same clusters. This problem of predicting will be approached with the following 3 perspectives:
+
+1. **Complete pooling** - No clusters. Every observation is independent. 
+2. **No Pooling** - we assume each pond tells us nothing about any other pond. 
+3. **Partial pooling** -  we use an adaptive regularising prior as in the above example. 
+
+In the first approach, we use the overall mean across the ponds, which can be accurate in case there is a lot of data, but it is still unlikely to exactly match the mean of any single pond. As a result, the total sample mean underfits the data in the **COMPLETE POOLING** approach. This is equivalent to assuming that the variation among ponds is zero - all ponds are identical. 
+
+For the second case, suppose we compute the empirical survival proportions for each pond and use them to predict (each pond thus has a separate intercept). In this case, in computing the mean for each pond, very little data contributes to the computation, which leads to high errors for the estimates. Thus we have a case of overfitting. Std errors for each intercept can be very large and in extreme cases, even infinite. These are sometimes called the **No Pooling** estimates where no info is shared across ponds. It is equivalent to assuming that the variation among ponds is infinite, so nothing learnt from one pond can help while predicting for another pond. 
+
+In the third case of **Partial Pooling**, we estimate varying intercepts and produce estimates that are less underfit than the mean from step 1 and less overfit than the no-pooling estimate, leading to better estimates of per cluster means. This is especially helpful when clusters have fewer observations. If there is a lot of data per cluster, then No pooling and partial pooling will give similar estimates. 
+
+We will now perform a simulation on tadpoles survival in ponds to confirm the above. 
+
+## The model
+
+We have the same model as before, but with ponds instead of tanks.
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{pond}[i]} \\
+\alpha_j &\sim \text{Normal} (\bar \alpha, \sigma) \\
+\bar \alpha &\sim \text{Normal}(0, 1.5) \\
+\sigma &\sim \text{Exponential}(1)  
+\end{align}
+$$
+
+To simulate, we need to assign values to:
+
+- $\bar \alpha$, the avg log-oods of survival in the entire population of ponds
+- $\sigma$, the sd of the distribution of log-odds of survival among ponds
+- $\alpha$, the vector of individual pond intercepts, one for each pond
+- $N_i$ - the sampe size for each pond
+
+
+## Assign values to parameters
+
+The below values are representative of actual tadpole data. 
+
+```{r}
+a_bar <- 1.4 # written as 1.5 in textbook but 1.4 in code on the website (http://xcelab.net/rmpubs/rethinking/code.txt)
+sigma <- 1.5
+nponds <- 60
+Ni <- as.integer(rep(c(5, 10, 25, 35), each = 15)) # stan wants the size variable in binom as integer
+```
+
+We have 60 ponds with 15 each of tadpole density of 5, 10, 25 and 35. We now need to simulate the log-odds for these 60 ponds (the intercepts) from $\mathcal{N}(1.4, 1.5)$
+
+```{r}
+set.seed(5005)
+a_pond <- rnorm(nponds, mean = a_bar, sd = sigma)
+
+dsim <- data.frame(pond = 1:nponds,   # index 
+                   Ni = Ni,           # initial tadpole count 
+                   true_a = a_pond)   # true log-odds survival for each pond
+```
+
+## Simulate survivors
+
+The probability of survival for each pond is the logit of the alphas computed earlier. 
+
+```{r}
+library(rethinking)
+dsim$Si <- rbinom(nponds, prob = logistic(dsim$true_a), size = dsim$Ni)
+```
+
+## Compute the no-pooling estimates
+
+This can be computed by calculating the proportion of survivors in each pond. We will keep them on the probability scale to facilitate comparison of quality of estimates on the prob scale later. 
+
+```{r}
+dsim$p_nopool <- dsim$Si / dsim$Ni
+```
+
+## Compute the partial pooling estimates
+
+We will use `ulam` to fit the model to the simulated data. 
+
+```{r results='hide'}
+dat <- list(Si = dsim$Si, 
+            Ni = dsim$Ni, 
+            pond = dsim$pond)
+m13.3 <- ulam(
+    alist(
+        Si ~ dbinom(Ni, p), 
+        logit(p) <- a_pond[pond], 
+        a_pond[pond] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4
+)
+```
+
+Let's look at the results of this varying intercept model:
+
+```{r}
+precis(m13.3, depth = 2)
+```
+
+We will now use this model to generate predicted survival proportions and add them to `dsim`. 
+
+```{r}
+post <- extract.samples(m13.3)
+dsim$p_partpool <- apply(inv_logit(post$a_pond), 2, mean)
+```
+
+To compare these to the true per-pond suvival probabilities, we will need to compute those using the `true_a` column (which was the log-odds). 
+
+```{r}
+dsim$p_true <- inv_logit(dsim$true_a)
+```
+
+We also need to calculate the absolute error between the estimates and the true varying effects. 
+
+```{r}
+nopool_error <- abs(dsim$p_nopool - dsim$p_true)
+partpool_error <- abs(dsim$p_partpool - dsim$p_true)
+```
+
+We will now plot our results:
+
+```{r fig.width=8}
+# error of nopool
+plot(1:60, nopool_error, col = rangi2, pch = 16, 
+     xlab = "pond", ylab = "absolute error", ylim = c(0, 0.5))
+
+# error of varying effects
+points(1:60, partpool_error)
+
+# divider lines
+abline(v = (1:4)*15)
+text(0  + 5, 0.5, "tiny ponds(5)")
+text(16 + 5, 0.5, "small ponds(10)")
+text(32 + 5, 0.5, "medium ponds(25)")
+text(48 + 5, 0.5, "large ponds(35)")
+
+# avg error per group 
+group_locations <- c(0, 15, 30, 45, 60)
+avg_no_pool_errors <- tapply(nopool_error, dsim$Ni, mean)
+avg_part_pool_errors <- tapply(partpool_error, dsim$Ni, mean)
+
+for(i in 1:4){
+    x_start <- group_locations[i]
+    x_end <- group_locations[i+1]
+ 
+    # no pool
+    lines(x = c(x_start, x_end), 
+          y = rep(avg_no_pool_errors[i], 2), 
+          col = rangi2)
+    
+    # part pool
+    lines(x = c(x_start, x_end), 
+          y = rep(avg_part_pool_errors[i], 2), 
+          lty = 2)
+}
+```
+
+- Filled blue points show the no-pooling estimates
+- black circles show the varying effect estimates
+- On the x-axis we have the ponds from 1 to 60
+- on the y-axis we have the distance between the mean estimated probability of survival and the actual probability of survival
+- vertical lines divide the groups of ponds with different initial tadpole densities
+- horizontal blue line show the avg error of the no pooling estimates
+- horizontal black dashed line show the avg error of the partial pooling estimates
+
+
+1. Both of the estimates are much more accurate for the larger ponds. More data usually leads to better estimates, as long as there is no confounding (in case of confounding, more data may make things worse). For the smaller ponds, the estimates are worse. 
+2. The blue line (no pool mean estimate) is always above or very close to the black dashed line (partial pooling mean estimate). No pool has typically worse estimates than partial pooling but this is not always true. The partial pooling is better on average in the long run.
+3. Distance between the blue and black dashed line grows as pond size decreases. So while both estimates suffer from smaller sample size, the partial pooling estimate suffers less. 
+
+The smaller ponds show the biggest improvement over the naive no-pooling estimates. The smaller clusters contain less information and are thus influenced more by the pooled information from the other clusters. Thus, small clusters, which are more prone to overfitting receive bigger influence from the underfit grand mean. The larger clusters, because of more data, are less prone to overfitting and thus require less correcting and see less shrinkage. 
+
+The partially pooled estimates are better on average since they adjust individual cluster estimates to negotiate teh trade-off between underfitting and overfitting. This is like regularisation, but one that is learned from the data itself. 
+
+The no-pooling estimates are better in cases, the ponds with extreme probabilities of survival. The partial pooling estimates shrink such extreme ponds towards the mean since few ponds exhibit such extreme behaviour. 
+
+### Overthinking: Repeating the pond simulation {.tabset .tabset-fade}
+
+We can get new samples using new data, without re-compiling. We need to call the function `stan` and pass it the `model@stanfit`. 
+
+We will perform a few simulations using the below code and draw the above diagram:
+
+```{r}
+simulate_tadpole_experiment <- function(){
+    # new simulation params
+    a <- 1.5
+    sigma <- 1.5
+    nponds <- 60
+    Ni <- as.integer(rep(c(5, 10, 25, 35), each = 15))
+    a_pond <- rnorm(nponds, mean = a, sd = sigma)
+    
+    # combine data together
+    dsim <- data.frame(pond = 1:nponds, 
+                       Ni = Ni, 
+                       true_a = a_pond)
+    dsim$Si <- rbinom(nponds, prob = inv_logit(dsim$true_a), size = dsim$Ni)
+    dsim$p_nopool <- dsim$Si / dsim$Ni
+    newdat <- list(Si = dsim$Si, 
+                   Ni = dsim$Ni, 
+                   pond = 1:nponds)
+    
+    # sample from existing model without recompiling
+    m13.3new <- stan(fit = m13.3@stanfit, data = newdat, chains = 4, refresh = 0)
+    
+    post <- extract.samples(m13.3new)
+    dsim$p_partpool <- apply(inv_logit(post$a_pond), 2, mean)
+    dsim$p_true <- inv_logit(dsim$true_a)
+    nopool_error <- abs(dsim$p_nopool - dsim$p_true)
+    partpool_error <- abs(dsim$p_partpool - dsim$p_true)
+    
+    
+    # Plot results
+    # error of nopool
+    plot(1:60, nopool_error, col = rangi2, pch = 16, 
+         xlab = "pond", ylab = "absolute error", ylim = c(0, 0.5))
+    
+    # error of varying effects
+    points(1:60, partpool_error)
+    
+    # divider lines
+    abline(v = (1:4)*15)
+    text(0  + 5, 0.5, "tiny ponds(5)")
+    text(16 + 5, 0.5, "small ponds(10)")
+    text(32 + 5, 0.5, "medium ponds(25)")
+    text(48 + 5, 0.5, "large ponds(35)")
+    
+    # avg error per group 
+    group_locations <- c(0, 15, 30, 45, 60)
+    avg_no_pool_errors <- tapply(nopool_error, dsim$Ni, mean)
+    avg_part_pool_errors <- tapply(partpool_error, dsim$Ni, mean)
+    
+    for(i in 1:4){
+        x_start <- group_locations[i]
+        x_end <- group_locations[i+1]
+        
+        # no pool
+        lines(x = c(x_start, x_end), 
+              y = rep(avg_no_pool_errors[i], 2), 
+              col = rangi2)
+        
+        # part pool
+        lines(x = c(x_start, x_end), 
+              y = rep(avg_part_pool_errors[i], 2), 
+              lty = 2)
+    }
+}
+```
+
+#### Simulation 1
+```{r fig.width=8}
+simulate_tadpole_experiment()
+```
+
+#### Simulation 2
+```{r fig.width=8}
+simulate_tadpole_experiment()
+```
+
+#### Simulation 3
+```{r fig.width=8}
+simulate_tadpole_experiment()
+```
+
+#### Simulation 4
+```{r fig.width=8}
+simulate_tadpole_experiment()
+```
+
+
+
+# More than one type of cluster
+
+Sometimes there can be situations where we need to use more than one type of cluster in the same model. For instance in the `chimpanzees` dataset (chimpanzees pulling levers to test their sociability), each pull belongs to both an `actor` as well as an experimental `block`. Thus, there may be unique intercepts for each actor as well as for each block. 
+
+This kind of data structure is usually called a **CROSS-CLASSIFIED** multilevel model. It is cross classified since actors are not nested within unique blocks. If each chimpanzee had instead done all of his/her pulls on a single day within a single block, then the data structure would be called **HIERARCHICAL**. The model spec would typically be the same. 
+
+## Multilevel chimpanzees
+
+For ease of understanding, here's the info about the chimpanzees dataset:
+
+> Experiment with chimpanzees. Focal chimpanzee sitting on a table with 2 levers, both of which bring two boxes to the two ends of the table (the end chimpanzee is sitting on and the opposite one). The boxes near the monkey both contain food, only one of the boxes on the opposite side contains the food. Experiment is to see if another chimpanzee is sitting on the other end, then would the focal chimpanzee select the "prosocial" option of pulling the lever that provides food to both or just itself. Controlled by watching the decicions when no companion. Food on the other end rotated to both sides to control for hand bias. 
+
+```{r}
+library(rethinking)
+data(chimpanzees)
+d <- chimpanzees
+```
+
+Fields 
+
+- `pulled_left` (0/1 indicator) will be used as the outcome to predict (1 - pulled left hand lever)
+- `prosoc_left`(0/1 indicator) (1 - left-hand lever was attached to the prosocial option) and 
+- `condition`(0/1 indicator) as predictor variables (1 - partner present)
+
+We will creat variable `treatment` that will have four possible combinations:
+- prosoc_left = 0 and condition = 0: Two food items on right and no partner. 
+- prosoc_left = 1 and condition = 0: Two food items on left and no partner. 
+- prosoc_left = 0 and condition = 1: Two food items on right and partner present. 
+- prosoc_left = 1 and condition = 1: Two food items on left and partner present.
+
+We will take the model that used `actor` and `treatment` as predictors (m11.4) and add varying intercepts by replacing the fixed regularising priors with an adaptive prior. We will also add a second cluster for `block` by replicating the structure for the `actor` cluster. Thus, the model will get another varying intercept $\alpha_{BLOCK[i]}$ and a corresponding std deviation parameter. 
+
+Here is the mathematical form of the model, with the new pieces highlighted in blue:
+
+\begin{align}
+L_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{ACTOR[i]}} + \color{blue}{\gamma_{\text{BLOCK[I]}}} + \beta_{\text{TREATMENT[I]}} \\
+\beta_j  &\sim \text{Normal}(0, 0.5) \qquad &, \text{for j = 1 .. 4} \\
+\alpha_j &\sim \text{Normal}(\bar \alpha, \sigma_\alpha) \qquad &, \text{for j = 1 .. 7} \\
+\color{blue}{\gamma_j} & \color{blue}{\sim \text{Normal}(0, \sigma_\gamma)} \qquad & \color{blue}{\text{, for j = 1 .. 6}} \\
+\bar \alpha & \sim \text{Normal}(0, 1.5) \\
+\sigma_\alpha & \sim \text{Exponential}(1) \\
+\sigma_\gamma & \sim \text{Exponential}(1)
+\end{align}
+
+Each cluster gets its own vector of parameters:
+
+- `actor` - $\alpha$, length 7 (7 chimpanzees in sample)
+- `blocks` - $\gamma$, length 6 (6 blocks)
+
+Both have their own sd param that adapts the amount of pooling across units. There is only global mean parameter $\bar \alpha$. A separate mean intercept cannot be identified for each varying intercept since both intercepts are added to the same linear prediction. (adding means of both will just cause multicollinearity). 
+
+```{r warning=TRUE, results='hold'}
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+
+dat_list <- list(
+    pulled_left = d$pulled_left, 
+    actor       = d$actor, 
+    block_id    = d$block,
+    treatment   = as.integer(d$treatment)
+)
+
+set.seed(13)
+m13.4 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + g[block_id] + b[treatment], 
+        b[treatment] ~ dnorm(0, 0.5), 
+        
+        ## adaptive priors
+        a[actor]     ~ dnorm(a_bar, sigma_a), 
+        g[block_id]  ~ dnorm(0    , sigma_g), 
+        
+        ## hyper priors
+        a_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1), 
+        sigma_g      ~ dexp(1) 
+    ), data = dat_list, chains = 4, cores = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+We get warnings about chains not mixing well. Let's see the trace plots:
+
+```{r fig.height=9}
+traceplot(m13.4)
+```
+
+g[1] and sigma_g seem to have a lot of spikes, but overall the chains seem to have mixed well. 
+
+According to the book, it did mix well, but had trouble exploring the posterior. We will see how to fix this later. 
+
+Let's look at the posterior:
+
+```{r fig.height=7}
+precis(m13.4, depth = 2)
+plot(precis(m13.4, depth = 2))
+```
+
+Some observations:
+
+- `n_eff` varies a lot by parameters. This is common for complex models. A common reason is that some params spend a lot of time near a boundary. In this case `sigma_g` spends a lot of time near its min zero. 
+- `Rhat` values are above 1 for some params. This is a sign on inefficient sampling. We will fix this later. 
+- comparing `sigma_a` to `sigma_g`, the estimated variance among actors >> estimated variance among blocks. We can see the difference in variation in the below plot. The model is confident that there is more variation among actors than blocks. We can also see this from the plot of the posterior means above. The varying intercepts for `actor` (a[i]) vary widely while those of block (g[i]) are mostly the same. 
+
+Thus `block` has not added overfitting risk.
+
+```{r}
+post <- extract.samples(m13.4)
+dens(post$sigma_a, xlim = c(0, 4), ylim = c(0, 3.5), lwd = 2)
+text(x = 3, y = 0.5, "actor")
+dens(post$sigma_g, add = TRUE, col = "royalblue3", lwd = 2)
+text(x = 0.5, y = 2.5, "block", col = "royalblue3")
+```
+
+We will compare the above model with two varying intercepts to a model with only varying intercepts for `actor`. 
+
+```{r}
+set.seed(14)
+m13.5 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + b[treatment], 
+        b[treatment] ~ dnorm(0, 0.5), 
+        a[actor]     ~ dnorm(a_bar, sigma_a), 
+        a_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1)
+    ), data = dat_list, chains = 4, cores = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+
+Comparing the two models:
+
+```{r}
+compare(m13.4, m13.5)
+```
+
+Looking at the `pWAIC` columns (effective no of params), `m13.4` only has 2 more effective params compared to `m13.5` (model without block). This is since each of the 6 `g` params in `m13.4` are strongly shrunk towards zero. The `a` params are shrink much less towards zero and thus contribute more to the pWAIC value. 
+
+The difference in WAIC between the models is very low and dSE is much greater than dWAIC. These models imply nearly identical predictions so their expeced out-of-sample accuracy is nearly identical. There is nothing to gain here by selecting either model. However, by reporting both we can learn more about the experiment. 
+
+## Even more clusters
+
+
+
+
+The parameters for treatment effects are very similar to those for actor and block, so we can use partial pooling on them as well. Some might say the treatment is not "random" but "fixed" so it should not have partial pooling, but the reason to use varying effects is because they provide better inferences not how the clusters arose. 
+
+> If the individual units are exchangable— the index values could be reassigned without changing the meaning of the model—then partial pooling could help.
+
+In this case we have only 4 treatments and lot of data on each, so partial pooling will not result in much difference. Here's how the model with varying effects for treatment work:
+
+```{r warning=TRUE, results='hold'}
+set.seed(15)
+m13.6 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + g[block_id] + b[treatment], 
+        
+        ## adaptive priors
+        a[actor]     ~ dnorm(a_bar, sigma_a), 
+        b[treatment] ~ dnorm(0    , sigma_b), 
+        g[block_id]  ~ dnorm(0    , sigma_g), 
+        
+        ## hyper priors
+        a_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1), 
+        sigma_g      ~ dexp(1), 
+        sigma_b      ~ dexp(1)
+    ), data = dat_list, chains = 4, cores = 4, log_lik = TRUE, refresh = 0
+)
+coeftab(m13.4, m13.6)@coefs[c(1:4, 21),]
+```
+
+The `b` params are not identical, but very close. `sigma_b` is also small (not as small as sigma_g though). The treatments don't vary a lot since they don't make much difference anyway and since there's lot of data, so they don't get pooled much either. 
+
+```{r}
+compare(m13.4, m13.6)
+```
+
+There's not much difference in their WAIC. We did get warnings about divergent transitions though, which we will deal with now. 
+
+# Divergent transitions and non-centered priors
+
+We learned about divergent transitions first in chapter 9, we will now explore them in detail. 
+
+HMC simulates the frictionless flow of a particle on a surface and as an internal test, checks for conservation of energy. In a numerical system however, the total energy at the end may not be equal to the total energy at the start. In these cases, the energy is **__divergent__**. This tends to happen when the posterior distribution is very steep in some region of parameter space, which are hard for a discrete physics simulation to follow. The algorithm notices by observing the discrepancy in the starting and ending energy which indicates a numerical problem while exploring that part of the posterior distribution. 
+
+Divergent transitions are rejected. This doesn't *directly* damage the approximation of the posterior distribution, but it hurts it indirectly since that region is hard to explore correctly. 
+
+There are two easy tricks for reducing the impact of divergent transitions. 
+
+1. Tune the simulation so that it doesn't overshoot the valley wall. This requires more warmup with a higher target acceptance rate, Stan's `adapt_delta`. However, for many models we cannot tune the sampler enough to remove all the divergent transitions. 
+2. **Reparameterise** the model by writing it in a different form, which is mathematically identical but numerically different. 
+
+## The Devil's Funnel
+
+We can experience divergent transitions from a simple model. Suppose we have the joint distribution of two variables $v$ and $x$:
+
+$$
+\begin{align}
+v &\sim \text{Normal}( 0, 3 ) \\
+x &\sim \text{Normal}( 0, \exp (v) ) 
+\end{align}
+$$
+There is no data here, only a joint distrubtion to sample from. This represents a typical multilevel model in thta the scale of one variable ($x$ in this case) depends upon another variable ($v$). 
+
+```{r warning = TRUE, results='hide'}
+m13.7 <- ulam(
+    alist(
+        v ~ normal(0, 3),
+        x ~ normal(0, exp(v))
+    ), data = list(N = 1), chains = 4, refresh = 0
+)
+```
+
+We get warnings about divergent transitions, large Rhat and low effective sample size. Let's look at the posterior:
+
+```{r warning = TRUE}
+precis(m13.7)
+```
+
+The results are pretty bad and the `n_eff` and `Rhat` values are very poor as well.
+
+```{r}
+traceplot(m13.7, n_cols = 2)
+```
+
+The traceplot shows the model did not converge. 
+
+This example is the **Devil's Funnel**. We show the distribution's contours. 
+
+```{r}
+# Below is from the example code in ?HMC_2D_sample
+# Devil's Funnel from Chapter 13
+U_funnel <- function( q , s=3 ) {
+    v <- q[2]
+    x <- q[1]
+    U <- sum( dnorm(x,0,exp(v),log=TRUE) ) + dnorm(v,0,s,log=TRUE)
+    return( -U )
+}
+U_funnel_gradient <- function( q , s=3 ) {
+    v <- q[2]
+    x <- q[1]
+    Gv <- (-v)/s^2 - length(x) + exp(-2*v)*sum( x^2 ) #dU/dv
+    Gx <- -exp(-2*v)*x #dU/dx
+    return( c( -Gx , -Gv ) ) # negative bc energy is neg-log-prob
+}
+
+set.seed(40)
+HMC_2D_sample( n=3 , U=U_funnel , U_gradient=U_funnel_gradient , 
+  step=0.2 , L=10 , ylab="v"  , adj_lvls=1/12 )
+```
+
+A low values of $v$, the distribution of $x$ contracts around zero. This forms a very steep valley for HMC to explore. The simulation is not continuous but happens in discrete steps, and if these steps are too big, the simulation overshoots which results in imbalance in the energy. 
+
+In the above figure, the simulation starts at 'x'. It finds the valley, but then misses its turn and careens into space. The open point is a divergent transition, a proposal for which the energy is not conserved. When we sample from this distribution, we get lots of these divergent transitions and a very unreliable approximation of the posterior distribution. In this case the distribution was simple enough that we could show this with a grid approximation. 
+
+
+We can fix this via reparameterising the funnel. There are two general ways to reparameterise a modmel in which the distribution of one parameter is a function of another parameter. In this example, it is $x$ whose distribution depends on $v$. 
+
+$$
+x \sim \text{Normal}(0, \exp (v))
+$$
+This is the source of the funnel. As $v$ changes, the distribution of $x$ changes in a very inconvenient way. This parameterisation is called **CENTERED PARAMETERISATION**. The name only indicates that the distribution of $x$ is conditional on one or more other parameters. 
+
+The alternatie is a **NON-CENTERED PARAMETERISATION**. A non-centered parameterisation moves the embedded parameter out of the definition of the other parameter. For The Devil's Funnel this can be accomplished in the following manner:
+
+$$
+\begin{align}
+v &\sim \text{Normal}(0, 3) \\
+x &\sim \text{Normal}(0, 1) \\
+x &= z \exp (v)
+\end{align}
+$$
+We have defined $z$ as the standardised version of $x$ ($z = \frac{x - \text{mean}(x)} { \text{sd}(x) }$). To get back x, we multiply it by the standard deviation and add mean which is what happens above (mean of x was already zero so there's nothing to add). 
+
+The result is that __x__ in the non-centered version has the same distribution as __x__ in the original, centered version. However, now when we run HMC, we don't sample __x__ directly but instead sample __z__. The below figure shows the contours for this:
+
+```{r}
+# Same, but with non-centered parameterization
+U_funnel_NC <- function( q , s=3 ) {
+    v <- q[2]
+    z <- q[1]
+    U <- sum( dnorm(z,0,1,log=TRUE) ) + dnorm(v,0,s,log=TRUE)
+    return( -U )
+}
+U_funnel_NC_gradient <- function( q , s=3 ) {
+    v <- q[2]
+    z <- q[1]
+    Gv <- (-v)/s^2 #dU/dv
+    Gz <- (-z) #dU/dz
+    return( c( -Gz , -Gv ) ) # negative bc energy is neg-log-prob
+}
+HMC_2D_sample( n=4 , U=U_funnel_NC , U_gradient=U_funnel_NC_gradient , 
+  step=0.2 , L=15 , ylab="v" , xlab="z" , xlim=c(-2,2) , nlvls=12 , adj_lvls=1 )
+```
+
+let's run the HMC via `ulam`:
+
+```{r}
+m13.7nc <- ulam(
+    alist(
+        v ~ normal(0, 3), 
+        z ~ normal(0, 1), 
+        gq> real[1]: x <<- z*exp(v)
+    ), data = list(N = 1), chains = 4, refresh = 0
+)
+precis(m13.7nc)
+```
+
+Plotting sampled x against v, we do see the funnel:
+
+```{r}
+post <- extract.samples(m13.7nc)
+with(post, plot(x, v, pch = 20, col = col.alpha("black", 0.2), xlim = c(-10, 10), 
+                main = "The Devil's Funnel"))
+```
+
+We have managed to sample from The Funnel by smapling a different variable and then transforming it. This non-centered parameterisation is often used with multilevel models, however, there are times when the centered parameterisation is better. 
+
+
+## Non-centered chimpanzees
+
+In model `m13.4`, the adaptive priors that make it a multilevel model have params inside them that cause regions of steep curvature and generate divergent transitions. 
+
+Before reparameterising, we can also try to increase Stan's target acceptance rate using the `adapt_delta` paramters. The `ulam` default is 0.95 which means that it aims to attain a 95% acceptance rate. It tries this during the warmup pahse, adjusting the step size of each leapfrog step. When `adapt_delta` is set high, it results in a smaller step size, which means a more accurate approximation of the curved surface. It can also mean slower exploration of the distribution. 
+
+We will now rerun by increasing `adapt_delta`. (for `m13.4`, we did not get divergent transitions)
+
+```{r results='hide'}
+set.seed(13)
+m13.4b <- ulam(m13.4, chains = 4, cores = 4, control = list(adapt_delta = 0.99))
+```
+
+
+```{r}
+cat(sprintf("Divergent transitions with new adapt_delta = %d \nDivergent transitions from old model = %d",
+        divergent(m13.4b),
+        divergent(m13.4)))
+```
+
+We actually get more divergent transitions now than before (4 vs 0). So sometimes changing `adapt_delta` can increase problems too. 
+
+```{r}
+precis(m13.4b, 2)
+```
+
+The chains still are not very efficient, the `n_eff` values are much lower than the number of samples (2000). 
+
+We will now try a non-centered version of the model. We want to get the parameters out of the adaptive priors and instead into the linear model. The two adaptive priors to transform were:
+
+\begin{align}
+\alpha_j &\sim \text{Normal}(\bar \alpha, \sigma_\alpha) & \qquad \text{[Intercept for actors]} \\
+\gamma_j &\sim \text{Normal}(0, \sigma_\gamma) & \qquad \text{[Intercept for blocks]}
+\end{align}
+
+We need to remove from the above two, $\bar \alpha$, $\sigma_alpha$ and $\sigma_\gamma$. We will again define some new variables that are given standard Normal distributions and then we'll reconstruct the original variables by undoing the transformation. This time we will do the reconstruction in the linear model. The completed non-centered model looks like (with altered parts in blue):
+
+\begin{align}
+L_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \color{blue}{\underbrace{\bar \alpha + z_{\text{ACTOR}[i]}\sigma_\alpha}_{\alpha_{\text{ACTOR}[i]}} + \underbrace{x_{\text{BLOCK}[i]}}_{\gamma_{BLOCK[i]}}} + \beta_{\text{TREATMENT}[i]} \\
+
+\beta_j &\sim \text{Normal}(0, 0.5) \qquad \text{for j = 1..4} \\
+
+\color{blue}{z_j} & \color{blue}{\sim} \color{blue}{\text{Normal}(0, 1)} &\qquad \text{[standardised actor intercepts]} \\
+\color{blue}{x_j} & \color{blue}{\sim} \color{blue}{\text{Normal}(0, 1)} &\qquad \text{[standardised block intercepts]} \\
+
+\bar \alpha &\sim \text{Normal}(0, 1.5) \\
+\sigma_\alpha &\sim \text{Exponential}(1) \\
+\sigma_\gamma &\sim \text{Exponential}(1) \\
+
+\end{align}
+
+The vector $z$ gives the standardised intercept for each actor, vector $x$ gives the standardised intercept for each block. Inside the linear model $\text{logit}(p_i)$, we have all the old parameters, the actor intercept is defined by:
+
+$$
+\alpha_j = \bar \alpha + z_j \sigma_\alpha
+$$
+and each block intercept by:
+
+$$
+\gamma_j = x_j \sigma_\gamma
+$$
+
+We will now sample from this model:
+
+```{r}
+set.seed(13)
+m13.4nc <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a_bar + z[actor]*sigma_a     +    # actor intercept
+                            x[block_id]*sigma_g  +    # block intercept
+                    b[treatment], 
+        b[treatment] ~ dnorm(0, 0.5), 
+        z[actor]     ~ dnorm(0, 1), 
+        x[block_id]  ~ dnorm(0, 1), 
+        a_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1), 
+        sigma_g      ~ dexp(1), 
+        
+        gq> vector[actor]:    a <<- a_bar + z*sigma_a, 
+        gq> vector[block_id]: g <<-         x*sigma_g
+    ), data = dat_list, chains = 4, cores = 4, refresh = 0
+)
+```
+
+We will now compare the `n_eff` for the two forms. We will only compare the a and g parameters. 
+
+```{r}
+precis_c <- precis(m13.4, depth = 2)
+precis_nc <- precis(m13.4nc, depth = 2)
+
+pars <- c(paste("a[", 1:7, "]", sep = ""), 
+          paste("g[", 1:6, "]", sep = ""), 
+          paste("b[", 1:4, "]", sep = ""), 
+          "a_bar", "sigma_a", "sigma_g")
+
+neff_table <- cbind(precis_c[pars, "n_eff"], 
+                    precis_nc[pars, "n_eff"])
+
+plot(neff_table, xlim = range(neff_table), ylim = range(neff_table), 
+     xlab = "n_eff (centered)", ylab = "n_eff (non-centered)", lwd = 2)
+abline(a = 0, b = 1, lty = 2)
+```
+
+We have plotted the `n_eff` values of non-centered (new model) vs the centered (old model). The non-centered gives better for all but two parameters. 
+
+```{r}
+precis(m13.4nc,)
+```
+
+The non-centered parameterisation is not always better. Sometimes in the same model, one cluster might do better with centered form and another with non-centered. Typically a cluster with low variation (such as block above) will sample better with a non-centered prior. If we have a large no of units inside a cluster but not much data for each unit, then again the non-centered is usually better. 
+
+We can transform non Gaussian distributions as well, for instance:
+
+$$
+\begin{align}
+x &\sim \text{Exponential}(1) \\
+\text{can be re-written as} & \implies \\
+x &= z\lambda \\
+z &\sim \text{Exponential}(1)
+\end{align}
+$$
+
+In the next chapter we will look at reparameterising multivariate distributions. 
+
+# Multilevel posterior predictions
+
+Just like all the other models we have seen so far, it's important to check the multilevel models by comparing posterior predictions to the sample. As the models get more complex, inspecting only the posterior means and intervals is not enough. 
+
+Another role for constructing implied predictions is in computing **INFORMATION CRITERIA** like AIC and WAIC. These criteria provide simple estimates of out-of-sample model accuracy, the KL divergence. In practical terms, IC provide a rough measure of a model's flexibility and therefore overfitting risk. 
+
+Varying effects in multilevel models introduce some nuances: 
+
+1. By definition, the model will not exactly retrodict the samples in this case as adaptive regularisation has a goal to trade off poorer fit in sample for better inference and better out of sample fit. Thus even a perfectly good model will differ from the raw data in a systematic way. 
+2. Prediction in case of multilevel models requires additional choices. There's option to make predictions on the same clusters as present in the sample used to train model as well as option to make prediction for new cluster altogether. 
+
+## Posterior predictions for same clusters
+
+When working with the same clusters as in the training sample, varying intercepts are just parameters and we just need to ensure that the right intercept is picked up for each case in the data. (this is automatically done by software including `link` and `sim`). 
+
+For the `chimpanzees` data, there were 7 unique actors (the clusters) and we have a varying intercept for each. We will construct posterior predictions (retrodictions) using both `link` and manually from scratch. 
+
+Below, we make predictions for actor number 2:
+
+```{r}
+chimp <- 2
+d_pred <- list(
+    actor     = rep(chimp, 4), 
+    treatment = 1:4, 
+    block_id  = rep(1, 4)
+)
+p <- link(m13.4, data = d_pred)
+p_mu <- colMeans(p)
+p_ci <- apply(p, 2, PI)
+```
+
+To do the same calculations manually, we need to remember the model. 
+
+```{r}
+post <- extract.samples(m13.4)
+str(post)
+```
+
+The varying intercepts are a matrix of samples. For example, `a` matrix has samples on rows and actors on columns. We can for instance plot the density for actor 5:
+
+```{r}
+dens(post$a[,5])
+```
+
+The manually calculating the predictions for any actor will look like the following:
+
+```{r}
+# custom link function
+p_link <- function(treatment, actor = 1, block_id = 1){
+    logodds <- with(post, 
+                    a[,actor] + g[,block_id] + b[,treatment])
+    return(inv_logit(logodds))
+}
+
+# computing predictions
+p_raw <- sapply(1:4, function(i) p_link(i, actor = 2, block_id = 1))
+p_mu <- colMeans(p_raw)
+p_ci <- apply(p_raw, 2, PI)
+```
+
+## Posterior predictions for new clusters
+
+> The problem of making predictions for new clusters is really a problem of generalizing from the sample. In general, there is no unique procedure for generalizing predictions outside of a sample. The right thing to do depends upon the causal model, the statistical model, and your goals. But if you have a generative model, then you can often think your way through it. The key idea is to use the posterior to parameterize a simulation that embodies the target generalization.
+
+We will consider a simple example where we want to predict how chimpanzees in some other population will respond to the level pulling experiment. The 7 unique intercepts from the experiment are not useful anymore since the chimpanzees are different now. One way to imagine this task is to consider what if we had fit the model by leaving out one of the actors, for instance 7. If we then want to assess the model's accuracy for actor #7, we again can't use the 6 unique intercepts for the other 6 actors. However, we can use `a_bar` and `sigma_a` parameters (which describe a statistical population of actors) and simulate new actors from it. 
+
+First, let's see how to construct posterior predictions for a new _average_ actor. Average here implies the intercept exactly at a_bar, the population mean. Since there is uncertainty about the population mean, there is still uncertainty about this average individual's intercept (but smaller than it really should be). 
+
+```{r}
+# a new link function
+p_link_abar <- function(treatment){
+    logodds <- with(post, a_bar + b[,treatment])
+    return(inv_logit(logodds))
+}
+```
+
+The function effectively ignores block by assuming it's average effect is about zero (it was in the sample). We summarise as before:
+
+```{r}
+post <- extract.samples(m13.4)
+p_raw <- sapply(1:4, function(i) p_link_abar(i))
+p_mu <- colMeans(p_raw)
+p_ci <- apply(p_raw, 2, PI)
+
+plot(NULL, xlab = "treatment", ylab = "proportion pulled left", main = "average actor",
+     ylim = c(0, 1), xaxt = "n", xlim = c(1,4))
+
+axis(1, at = 1:4, labels = c("R/N", "L/N", "R/P", "L/P"))
+lines(1:4, p_mu)
+shade(p_ci, 1:4)
+```
+
+The shaded grey region shows the 89% compatibility interval for an actor with an average intercept. This type of calculation shows the impact of `prosoc_left` as well as uncertainty about where the average is, but it doesn't show the variation among actors. To do so, we will need to use `sigma_a` in the calculation. 
+
+We will sample some random chimpanzees first from N(a_bar, sigma_a) and then write a link function that references those simulated chimpanzees, not the ones in the posterior. We need to sample chimpanzees outside the link function since we want to reference the same simulated chimpanzee whichever treatment we consider. 
+
+```{r}
+a_sim <- with(post, rnorm(length(post$a_bar), a_bar, sigma_a)) # get 2k samples of actors
+
+
+p_link_asim <- function(treatment){
+    logodds <- with(post, a_sim + b[,treatment])
+    return(inv_logit(logodds))
+}
+
+p_raw_asim <- sapply(1:4, function(i) p_link_asim(i))
+
+# summarising an dplotting
+p_mu <- colMeans(p_raw_asim)
+p_ci <- apply(p_raw_asim, 2, PI)
+
+plot(NULL, xlab = "treatment", ylab = "proportion pulled left", main = "marginal of actor",
+     ylim = c(0, 1), xaxt = "n", xlim = c(1,4))
+
+axis(1, at = 1:4, labels = c("R/N", "L/N", "R/P", "L/P"))
+lines(1:4, p_mu)
+shade(p_ci, 1:4)
+```
+
+These posterior predictions are marginal of actor, which means that they average over uncertainty among actors. The earlier graph ingored this variation among actors. 
+
+Both approaches are useful depending upon the question. The predictions for an average actor help to visualize the impact of treatments. The predictions that are marginal of actor illustrate how variable different chimpanzees are according to the model. 
+
+For this particular example, we can even do better than both approaches and make a plot that displays both the treatment effect and variation among actors. We can do this by simulating a series of new actors in each of the four treatments (ignoring the intervals). 
+
+We can use the rows in `p_raw_asim` for this, in which every single row is a single trend for a single simulated chimpanzee. 
+
+```{r}
+plot(NULL, xlab = "treatment", ylab = "proportion pulled left", main = "simulated actors",
+     ylim = c(0, 1), xaxt = "n", xlim = c(1,4))
+
+axis(1, at = 1:4, labels = c("R/N", "L/N", "R/P", "L/P"))
+
+for(i in 1:100)
+    lines(1:4, p_raw_asim[i,], col = grau(0.25), lwd = 2)
+```
+
+We can see both the effect of treatment as well as the variation between actors introduced by the posterior distribution of sigma_a. 
+
+> Also note the interaction of treatment and the variation among actors. Because this is a binomial model, in principle all parameters interact, due to ceiling and floor effects. For actors with very large intercepts, near the top of the plot, treatment has very little effect. These actors have strong handedness preferences. But actors with intercepts nearer the mean are influenced by treatment.
+
+
+

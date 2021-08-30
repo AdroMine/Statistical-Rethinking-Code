@@ -9,7 +9,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error =FALSE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error =FALSE, cache = TRUE)
 library(rstan)
 rstan_options(auto_write = TRUE)
 Sys.setlocale(locale = "Chinese")
@@ -857,7 +857,7 @@ where $E_i$ is the completed education level of individual __i__. Now the sum of
 
 $\beta_E$ also helps us define priors. If we want all deltas to have the same incremental effect we can have the same priors for all, and still have a separate prior for max effect for $beta_E$. It can be negative too, in which case all incremental effects are negative too. 
 
-> Model
+## Model equation
 
 We will now build education into the ordered logit model as an ordered predictor. Here's the model in mathematical form:
 
@@ -875,7 +875,7 @@ $$
 
 For the priors, the cutpoints are on the logit scale, so regularising priors have been used for kappa [N(0,1.5)]. The slopes get narrower priors. For delta we use a **Dirichlet Distribution**. 
 
-> Dirichlet Distribution
+## Dirichlet Distribution
 
 This is a multivariate extension of the beta distribution. Like the beta, it is a dist for probs, values between zero and one that all sum to one. The beta is a distribution for two probabilities. The Dirichlet is a distribution for any number. Like the beta, it is parametrized by the pseudo-counts of observations. In the beta these were $\alpha$ and $\beta$, the prior counts of success and failures. 
 
@@ -906,8 +906,10 @@ for(i in 1:nrow(delta))
 
 One of the vectors has been highlighted. The prior here doesn't make any assumptions that all the probs are going to be same, or that some are going to be smaller/larger than others. For each of the 7 id, we get probs taking up a wide space. 
 
-Code:
-```{r results='hide'}
+## Modelling 
+
+Create the list form of data. 
+```{r}
 dat <- list(
     R = d$response, 
     action = d$action, 
@@ -916,6 +918,10 @@ dat <- list(
     E = as.integer(d$edu_new),    # edue_new as an index
     alpha = rep(2, 7)
 )
+```
+
+Code to create model:
+```{r results='hide', eval=FALSE}
 m12.6 <- ulam(
     alist(
         R ~ ordered_logistic(phi, kappa), 
@@ -926,6 +932,10 @@ m12.6 <- ulam(
         simplex[7]: delta ~ dirichlet(alpha)
     ), data = dat, chains = 4, cores = 4
 )
+```
+
+```{r echo=FALSE}
+load("m12.6.rdata")
 ```
 
 The data list contains the alpha prior. We pass it as "data", but it is Dirichlet prior from before. 
@@ -975,3 +985,88 @@ precis(m12.7)
 The effect of education is much less pronounced now. This is possibly because the effect isn't actually linear. Different levels have different incremental associations. 
 
 > From a causal perspective, a concern is that education is highly correlated with age, so including Education opens a backdoor from age to rating. 
+
+
+For model `m12.6`, one issue that we did not see in the text, is that `link` fails to work with it (for {rethinking} package version 2.13). To get predictions we need to write a custom link function. Let's do that next. 
+
+
+# Using link with m12.6
+
+By default `link` does not work with model m12.6 (rethinking version 2.13). 
+
+```{r error=TRUE}
+new_dat <- data.frame(
+  action = 0, 
+  contact = 0, 
+  intention = 0:1, 
+  E = 5
+)
+post <- extract.samples(m12.6)
+preds <- link(m12.6, data = new_dat, post = post)
+```
+
+`append_row` is a stan function on the C++ side. We can write our a very simple `append_row` function that replicates it by adding a zero column vector at the start. (No error checking or length matching is done here)
+
+```{r error=TRUE}
+# if given two vectors/matrices x,y attach x at the start
+append_row <- function(x, y) cbind(x, y)
+
+preds <- link(m12.6, data = new_dat)
+```
+
+Now we get an error about `delta_j`, note the two `TRUE` above. `delta_j` is a matrix, but we try to subset into a third dimension as well. 
+
+Let's write our link function to get predictions from this model. This will be a very simple `link` function that will only work for this given model. We need to look at the model formula for phi to see how to get its value. 
+
+
+`phi <- bE*sum(delta_j[1:E]) + bA * action + bI * intention + bC*contact`
+
+We just need to do the same computation as above for each data point using the values from the extracted samples to use for the parameters. 
+
+```{r}
+link_ordered_cat <- function(post, new_data){
+    
+    # create the output vector before hand
+    phi <- vector("numeric", length = length(post$bA))
+    
+    # run a loop, for each sample, do the computation
+    for(i in 1:length(post$bA)){
+        phi[i] <- with(post, 
+                         bE[i] * sum(delta[i, 1:new_data$E]) + bA[i]*new_data$action + bI[i] * new_data$intention + bC[i] * new_data$contact)
+    }
+    phi
+}
+
+preds <- sapply(1:nrow(new_dat), function(i) link_ordered_cat(post, new_dat[i,]))
+str(preds)
+```
+
+As before, we get values of phi for all the samples. We can convert this to cumulative probabilities for each outcome class using `pordlogit` as before. 
+
+```{r}
+# for each sample, we take the value of `phi` and `cutpoints` and compute the 
+# cumulative probabilities for the 7 classes
+pk <- array(data = 0, dim = c(nrow(preds), ncol(preds), 7))
+
+# using nested loops 
+for(i in 1:ncol(preds)){      # for each row in test data
+    for(j in 1:nrow(preds)){  # for each sample 
+        pk[j, i, ] <- pordlogit(1:7, preds[j, i], post$kappa[j,])
+    }
+}
+
+str(pk)
+```
+
+`pk` is a 3D array containing [samples, rows of new_data, 7 cumulative probabilities]
+
+Thus to get the cumulative probabilities from all samples for the first row of data we can run:
+
+```{r}
+str(pk[, 1, ])
+
+# looking at the values of just the first sample for the first row of new_data
+pk[1, 1, ]
+```
+
+We can then use these predictions as we have used predictions before. 

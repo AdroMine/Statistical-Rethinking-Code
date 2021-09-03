@@ -20,5 +20,1140 @@ Sys.setlocale(locale = "Chinese")
 
 # Easy Questions
 
-## 12E1
+## 13E1
+> Which of the following priors will produce more shrinkage in the estimates? 
+
+- $α_{\text{tank}} ∼ \text{Normal}(0, 1)$ 
+- $α_{\text{tank}} ∼ \text{Normal}(0, 2)$
+
+Both have the same mean, so the former with a smaller sd is more informative/regularising, as such it should produce more shrinkage in the estimate. 
+
+## 13E2 
+> Rewrite the following model as a multilevel model:
+
+$$
+\begin{align}
+y_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{GROUP[i]}} + \beta x_i \\
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(0, 1.5) \\
+\beta &\sim \text{Normal}(0, 1.5)
+\end{align}
+$$
+
+We need to put hyperpriors for $\alpha_{GROUP[i]}$. Thus our equation will become:
+
+\begin{align}
+y_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{GROUP[i]}} + \beta x_i \\
+
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(\bar \alpha, \sigma_g) \\
+
+\beta &\sim \text{Normal}(0, 1.5) \\
+\bar \alpha &\sim \text{Normal}(0, 1.5) \\
+\sigma_{g} &\sim \text{Exponential}(1)
+\end{align}
+
+## 13E3 
+> Rewrite the following model as a multilevel model. 
+
+$$
+\begin{align}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha_{\text{GROUP[i]}} + \beta x_i \\
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(0, 5) \\
+\beta &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align}
+$$
+
+Multilevel version:
+
+$$
+\begin{align}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{\text{GROUP[i]}} + \beta x_i \\
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(\bar \alpha, \sigma_\alpha) \\
+\beta &\sim \text{Normal}(0, 1) \\ 
+\sigma &\sim \text{Exponential}(1) \\
+\bar \alpha &\sim \text{Normal}(0, 5) \\
+\sigma_\alpha &\sim \text{Exponential}(1)
+\end{align}
+$$
+
+## 13E4 
+> Write a mathematical model formula for a Poisson regression with varying intercepts. 
+
+$$
+\begin{align}
+y_i &\sim \text{Poisson}(\lambda_i) \\
+\log (\lambda_i) &= \alpha_{\text{GROUP[i]}} + \beta x_i \\
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(\bar \alpha, \sigma_\alpha) \\
+\beta &\sim \text{Normal}(0, 1) \\ 
+\bar \alpha &\sim \text{Normal}(0, 5) \\
+\sigma_\alpha &\sim \text{Exponential}(1)
+\end{align}
+$$
+
+## 13E5
+> Write a mathematical model formula for a Poisson regression with two different kinds of varying intercepts, a cross-classified model.
+
+$$
+\begin{align}
+y_i &\sim \text{Poisson}(\lambda_i) \\
+\log (\lambda_i) &= \alpha_{\text{G1[i]}} + \alpha_{\text{G2[i]}} + \beta x_i \\
+\alpha_{\text{G1[i]}} &\sim \text{Normal}(\bar \alpha_1, \sigma_{g1}) \\
+\alpha_{\text{G1[i]}} &\sim \text{Normal}(\bar \alpha_2, \sigma_{g2}) \\
+\beta &\sim \text{Normal}(0, 1) \\ 
+\bar \alpha_1, \bar \alpha_2 &\sim \text{Normal}(0, 5) \\
+\sigma_{g1}, \sigma_{g1} &\sim \text{Exponential}(1)
+\end{align}
+$$
+
+# Medium Questions
+
+## 13M1
+> Revisit the Reed frog survival data, data(reedfrogs), and add the predation and size treatment variables to the varying intercepts model. Consider models with either main effect alone, both main effects, as well as a model including both and their interaction. Instead of focusing on inferences about these two predictor variables, focus on the inferred variation across tanks. Explain why it changes as it does across models.
+
+Data reminder:
+
+- survival of tadpoles
+- initial density provided
+- multiple tanks with their own idiosyncracies
+
+Loading in dataset:
+
+```{r}
+library(rethinking)
+data(reedfrogs)
+d <- reedfrogs
+```
+
+We will make the following models:
+
+> Model with predation as predictor
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} + \beta_P \text{Pred} \\
+\beta_P &\sim \text{Normal}(0, 2) \\
+\alpha_j &\sim \text{Normal} (\bar \alpha, \sigma) &\text{[adaptive prior]} \\
+{\bar \alpha} &\sim \text{Normal}(0, 1.5) &\text{[prior for average tank]} \\
+{\sigma} & \sim \text{Exponential}(1)  &\text{[prior for standard deviation of tanks]}
+\end{align}
+$$
+
+> Model with size as predictor
+
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} + \beta_S \text{Size} \\
+\beta_S &\sim \text{Normal}(0, 2) \\
+\alpha_j &\sim \text{Normal} (\bar \alpha, \sigma) &\text{[adaptive prior]} \\
+{\bar \alpha} &\sim \text{Normal}(0, 1.5) &\text{[prior for average tank]} \\
+{\sigma} & \sim \text{Exponential}(1)  &\text{[prior for standard deviation of tanks]}
+\end{align}
+$$
+
+> Model with both effects
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} + \beta_P \text{Pred} + \beta_S \text{Size} \\
+\beta_S, \beta_P &\sim \text{Normal}(0, 2) \\
+\alpha_j &\sim \text{Normal} (\bar \alpha, \sigma) &\text{[adaptive prior]} \\
+{\bar \alpha} &\sim \text{Normal}(0, 1.5) &\text{[prior for average tank]} \\
+{\sigma} & \sim \text{Exponential}(1)  &\text{[prior for standard deviation of tanks]}
+\end{align}
+$$
+
+> Model with both predictors + interaction
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} + \beta_P \text{Pred} + \beta_S \text{Size} + \beta_{PS} \times \text{Pred} \times \text{Size} \\
+\beta_S, \beta_P, \beta_{PS} &\sim \text{Normal}(0, 2) \\
+\alpha_j &\sim \text{Normal} (\bar \alpha, \sigma) &\text{[adaptive prior]} \\
+{\bar \alpha} &\sim \text{Normal}(0, 1.5) &\text{[prior for average tank]} \\
+{\sigma} & \sim \text{Exponential}(1)  &\text{[prior for standard deviation of tanks]}
+\end{align}
+$$
+
+
+```{r results='hide'}
+# make the tank cluster variable
+d$tank <- 1:nrow(d)
+
+dat <- list(
+    S = d$surv, 
+    N = d$density, 
+    tank = d$tank, 
+    P = ifelse(d$pred == "no", 1, 2), 
+    S = ifelse(d$size == "small", 1, 2)
+)
+
+# model with presenece of predator as predictor
+m1_p <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank] + bp*P, 
+        bp ~ dnorm(0, 2), 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+# model with size of tadpoles as predictor
+m1_s <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank] + bs*S, 
+        bs ~ dnorm(0, 2), 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+# model with both predator presence and size of tadpole as predictors
+m1_ps <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank] + bp*P + bs*S, 
+        c(bp, bs) ~ dnorm(0, 2), 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+# above model + interaction
+m1_psi <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank] + bp*P + bs*S + bps*P*S, 
+        c(bp, bs, bps) ~ dnorm(0, 2), 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+# m13.2 from text
+m13.2 <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank], 
+        a[tank] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+```
+
+
+Let's compare the sigma for the varying effects across the four models:
+
+```{r}
+plot(coeftab(m1_p, m1_s, m1_ps, m1_psi, m13.2), pars = 'sigma')
+coeftab(m1_p, m1_s, m1_ps, m1_psi, m13.2)@coefs['sigma',]
+```
+
+We have the original model from the chapter for comparison. The variation between tanks is highest in `m13.2`. Adding the predictors brings down the variation, implying that the predictors have some explanatory power. The presence of predictors brings down the variation more than the size of tadpoles, while together they bring it down even further. The model with interaction is not better than the model with both the predictors. 
+
+## 13M2
+> Compare the models you fit just above, using WAIC. Can you reconcile the differences in WAIC with the posterior distributions of the models?
+
+```{r}
+compare(m1_p, m1_s, m1_ps, m1_psi, m13.2)
+```
+
+All the models are expected to perform similarly out of sample. 
+
+Let's look at the posterior distributions of the models:
+
+First we need to extract all samples:
+```{r}
+all_models <- list(
+    pred = m1_p, 
+    size = m1_s, 
+    both = m1_ps, 
+    intr = m1_psi, 
+    base = m13.2
+)
+
+# extract samples for all models, remove a[#] from samples
+samples <- lapply(all_models, function(x){
+    post <- extract.samples(x)
+    nm <- names(post)
+    post[setdiff(nm, 'a')]
+})
+
+# some data wrangling
+
+library(dplyr)
+library(tidyr)
+
+# for each model's samples, combine them all into a data frame
+# (they are all the same length)
+# and then convert to long form (so that we have same number of columns across models)
+# finally row bind the samples from all models into samples_tibble
+
+samples_tibble <- bind_rows(
+    purrr::imap(samples, function(x, nm){
+        bind_cols(x) %>% 
+            mutate(model = nm) %>% 
+            pivot_longer(-model, names_to = "term")
+    })) %>% 
+    mutate(model = forcats::fct_relevel(model, 
+                                        "base", 
+                                        "pred", 
+                                        "size",
+                                        "both", 
+                                        "intr"))
+
+```
+
+Posterior distribution for all variables:
+
+```{r}
+ggplot(samples_tibble, aes(x = value, fill = model)) + 
+    geom_density(alpha = 0.5) + 
+    facet_wrap(~term, scales = "free") + 
+    # scale_x_continuous(breaks = scales::pretty_breaks()) + 
+    scale_fill_brewer(palette = "Set1") + 
+    theme_classic()
+```
+
+We have the posterior distributions of all the variables for all the models above. Some observations:
+
+Let's focus on just a single model, the one that included pred (blue colour above) and compare it to the base model (red). The mean survival estimate for tank (a_bar) is higher for the the model with predator presence as predictor, however, the effect of predator is negative (as expected, presence of predators should decrease survival rate). Combining the higher base survival rate with the negative effect of predators, it is likely the actual predictions are close enough to the predictons of tank only model. Thus, while `pred` does seem to have a considerable causal effect, but in terms of predictions, it does not add make much difference (at least in this dataset). 
+
+Similar inferences can be made for the other models. 
+
+We can also see the reduced variation between tanks in the models with additional predictors compared to the tank only model. Thus while these predictors help explain the difference between tanks, they don't seem to explain the within tank variation which could be be why the WAIC scores are so similar. There's also the fact, that there are no extra within tank observations. We only have aggregated figures for each tank. So there's nothing to explain within a tank anyway. Thus the base rates learned by adaptive regularisation are able to predict just as well as the results from a model with predictors. 
+
+## 13M3
+> Re-estimate the basic Reed frog varying intercept model, but now using a Cauchy distribution in place of the Gaussian distribution for the varying intercepts. That is, fit this model:
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} \\
+\alpha_{\text{TANK}} &\sim \text{Cauchy} (\alpha, \sigma)  \\
+{\alpha} &\sim \text{Normal}(0, 1.5)  \\
+{\sigma} & \sim \text{Exponential}(1)  
+\end{align}
+$$
+> (You are likely to see many divergent transitions for this model. Can you figure out why? Can you fix them?) Compare the posterior means of the intercepts, αtank, to the posterior means produced in the chapter, using the customary Gaussian prior. Can you explain the pattern of differences? Take note of any change in the mean α as well.
+
+```{r warning=TRUE}
+m3 <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank], 
+        a[tank]  ~ dcauchy(a_bar, sigma), 
+        a_bar    ~ dnorm(0, 1), 
+        sigma    ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE, control = list(adapt_delta = 0.99), refresh = 0, cmdstan = TRUE
+)
+```
+
+As mentioned in the question, we did get around 104 divergent transitions when running this model via rstan. Even increasing the `adapt_delta` didn't help much. However, switching to `cmdstan` somehow lead to zero divergent transitions. 
+
+We also repatameterise the above equation to a non-centered form. Stan's manual has a section on how to reparameterise a [Cauchy disribution](http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup) where it suggests to reparameterise a variable that is Cauchy distributed in the following manner:
+
+$$
+\begin{align}
+\beta &\sim \text{Cauchy}(\mu, \sigma) \\
+\text{Replace with} \implies \\
+\beta &= \mu + \tau \tan(\text{beta_unif}) &\text{[beta ~ caucy(mu, tau)]} \\
+\text{beta_unif} &\sim \text{Uniform}(-\pi/2, \pi/2)
+\end{align}
+$$
+
+Re-parameterize to non-centered form:
+```{r warning = TRUE}
+dat$pi_2_pos <- pi/2
+dat$pi_2_neg <- -pi/2
+
+m3_nc <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a_bar + tan(a[tank]) * sigma, 
+        a[tank]  ~ dunif(pi_2_neg, pi_2_pos), 
+        a_bar    ~ dnorm(0, 1), 
+        sigma    ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE, cmdstan = TRUE, refresh = 0
+)
+```
+
+This actually increased the divergent transitions when running via `rstan`. However, with `cmdstan` we did get zero divergent transitions and similar results as `m3` with `cmdstan`. However, `m3` gets better `Rhat` and `n_eff` values. 
+
+Let's look at the posterior means:
+
+```{r}
+precis(m3)
+precis(m3_nc)
+```
+
+The two models give similar results thoough
+
+Let's compare the posterior means:
+
+```{r}
+precis(m13.2)
+precis(m3)
+```
+
+The global average mean is higher for `m3` (model with Cauchy distribution as the prior for alpha_tanks). It also has a lower sigma. However, it's probably not a good idea to compare the sigma from Cauchy to sigma from Normal. Let's instead plot the expected outputs of the two models + the distributions of simulated tank intercepts from the two models. 
+
+```{r fig.height=6}
+post_norm <- extract.samples(m13.2)
+post_cau <- extract.samples(m3)
+
+# compute estimated average tank survival rate
+norm_est <- logistic(colMeans(post_norm$a))
+cauchy_est <- logistic(colMeans(post_cau$a))
+
+
+# display raw proportions surviving in each tank 
+plot(d$propsurv, ylim = c(0, 1), pch = 16, xaxt = "n", col = 'black',
+     xlab = "tank", ylab = "proportion survival")
+axis(1, at = c(1, 16, 32, 48), labels = c(1, 16, 32, 48))
+
+
+red <- 'firebrick'
+blue <- 'royalblue2'
+green <- "#4DAF4A"
+
+# overlay posterior means
+points(norm_est, col = red, pch = 16)
+points(cauchy_est, col = blue, pch = 16)
+
+
+# mark posterior mean probability across tanks
+abline(h = mean(logistic(post_norm$a_bar)), lty = 2, col = red)
+abline(h = mean(logistic(post_cau$a_bar)), lty = 2, col = blue)
+
+
+# draw vertical dividers between tank densities
+abline(v = 16.5, lwd = 0.5)
+abline(v = 32.5, lwd = 0.5)
+text(8, 0, "small tanks")
+text(16 + 8, 0, "medium tanks")
+text(32 + 8, 0, "large tanks")
+
+legend(x = 0.4, y = 0.15, 
+       legend = c("Raw survival proportions", 
+                  expression(a[TANK]%~%Normal(bar(alpha), sigma)), 
+                  expression(a[TANK]%~%Cauchy(bar(alpha), sigma))), 
+       col = c("black", red, blue), pch = 16)
+```
+
+- Black points are the empirical survival proportions
+- Blue points are the varying intercepts from the model in the chapter
+- Red points are the varying intercepts from the model with Cauchy distribution as the prior
+
+We can again see the estimated mean survival estimate is higher for the model with the Cauchy prior. Across the board we also observe (except for a couple observations) more shrinkage for this model. 
+
+
+Let's plot 100 Gaussian and Cauchy distributions using the values obtained from the posterior distribution of $\bar \alpha$ and $\sigma$. We will also sample 8,000 new log odds of survival for each individual tank which will help us get a posterior distribution of the variation in survival among tanks. 
+
+```{r}
+withr::with_par(
+    list(mfrow = c(1, 2)), 
+    code = {
+        # show first 100 populations in the posterior
+        plot(NULL, xlim =c(-8, 8), ylim = c(0, 0.75), 
+             xlab = "log-odds survive", ylab = "Density")
+        
+        for(i in 1:100){
+            curve(dcauchy(x, post_cau$a_bar[i], post_cau$sigma[i]), add = TRUE, col = col.alpha(red, 0.2))
+            curve(dnorm(x, post_norm$a_bar[i], post_norm$sigma[i]), add = TRUE, col = col.alpha('black', 0.2))
+        }
+        mtext("100 distributions of the log-odds of \nsurvival sampled from the posterior")
+        
+        # sample 8000 imaginary tanks from the posterior distribution
+        sim_tanks_old <- rnorm  (8000, post_norm$a_bar, post_norm$sigma)
+        sim_tanks_new <- rcauchy(8000, post_cau$a_bar, post_cau$sigma)
+        
+        # transform to probability and visualise
+        dens(inv_logit(sim_tanks_old), lwd = 2, adj = 0.1)
+        dens(inv_logit(sim_tanks_new), lwd = 2, adj = 0.1, col = red, add = TRUE)
+        mtext("Survival probs for 8k new simulated tanks")
+        
+    }
+)
+```
+
+In the above figure, black lines represent the posterior from the model with the normal prior while red indicate the posterior for the model with the Cauchy prior. 
+The Cauchy distribution by nature has fatter tails, which is visible in the figure on the left. However, the posterior for tank intercepts is much for confined for this model (the distribution is narrower). 
+
+We can also see the same from the figure on the right. The model with the narrower prior does not expect survival probability to be near zero (Normal distributions have thin tails, so extreme events are very less likely), whereas the model with the Cauchy prior expects both extremes equally (zero survival in tank as well as all surviving). However, barring the extremities (a nature of Cauchy distribution itself), overall this model assigns more density towards the estimated mean for all the tanks (approx around 0.8), while `m13.2` allows lesser survival rates. In other words, the model with the Cauchy distribution has higher shrinkage in this example. 
+
+## 13M4
+> Now use a Student-t distribution with __ν__ = 2 for the intercepts
+
+$$
+\alpha_{\text{TANK}} \sim \text{Student}(2, \alpha, \sigma)
+$$
+
+Refer back to the Student-t example in Chapter 7 (page 234), if necessary. Compare the resulting posterior to both the original model and the Cauchy model in 13M3. Can you explain the differences and similarities in shrinkage in terms of the properties of these distributions?
+
+The model now becomes:
+
+$$
+\begin{align}
+S_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{TANK}[i]} \\
+\alpha_{\text{TANK}} &\sim \text{Student} (2, \bar \alpha, \sigma)  \\
+{\alpha} &\sim \text{Normal}(0, 1.5)  \\
+{\sigma} & \sim \text{Exponential}(1)  
+\end{align}
+$$
+
+```{r}
+m4 <- ulam(
+    alist(
+        S ~ dbinom(N, p), 
+        logit(p) <- a[tank], 
+        a[tank]  ~ dstudent(2, a_bar, sigma), 
+        a_bar    ~ dnorm(0, 1), 
+        sigma    ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE, control = list(adapt_delta = 0.99), refresh = 0
+)
+```
+
+Comparing the distributions in the same way as in the previous question:
+
+```{r fig.height=7}
+post_norm <- extract.samples(m13.2)
+post_cau <- extract.samples(m3)
+post_stu <- extract.samples(m4)
+
+# compute estimated average tank survival rate
+norm_est <- logistic(colMeans(post_norm$a))
+cauchy_est <- logistic(colMeans(post_cau$a))
+student_est <- logistic(colMeans(post_stu$a))
+
+
+# display raw proportions surviving in each tank 
+# plot(d$propsurv, ylim = c(0, 1), pch = 16, xaxt = "n", col = 'black',
+# xlab = "tank", ylab = "proportion survival")
+plot(NULL, ylim = c(0, 1), pch = 16, xaxt = "n", col = 'black', xlim = c(1, 48),
+     xlab = "tank", ylab = "proportion survival")
+axis(1, at = c(1, 16, 32, 48), labels = c(1, 16, 32, 48))
+
+
+# overlay posterior means
+points(norm_est, col = red, pch = 16)
+points(cauchy_est, col = blue, pch = 16)
+points(student_est, col = green, pch = 16)
+
+
+# mark posterior mean probability across tanks
+abline(h = mean(logistic(post_norm$a_bar)), lty = 2, col = red)
+abline(h = mean(logistic(post_cau$a_bar)), lty = 2, col = blue)
+abline(h = mean(logistic(post_stu$a_bar)), lty = 2, col = green)
+
+
+# draw vertical dividiers between tank densities
+abline(v = 16.5, lwd = 0.5)
+abline(v = 32.5, lwd = 0.5)
+text(8, 0, "small tanks")
+text(16 + 8, 0, "medium tanks")
+text(32 + 8, 0, "large tanks")
+
+legend(x = 0.4, y = 0.15, 
+       legend = c(#"Raw survival proportions", 
+           expression(a[TANK]%~%Normal(bar(alpha), sigma)), 
+           expression(a[TANK]%~%Cauchy(bar(alpha), sigma)), 
+           expression(a[TANK]%~%Student(bar(alpha), sigma))),
+       col = c( red, blue, green), pch = 16)
+```
+
+The original points have been removed for to reduce clutter. In almost all the tanks, the estimates from the model using the student-t prior falls somewhere in between the estimate of the model with Cauchy vs Normal priors. Therefore, shrinkage is: normal < student-t < cauchy. (at least with the given priors)
+
+
+Reproducing the second plot:
+
+```{r fig.height=7}
+withr::with_par(
+    list(mfrow = c(2, 1)), 
+    code = {
+        # show first 100 populations in the posterior
+        plot(NULL, xlim =c(-8, 8), ylim = c(0, 0.75), 
+             xlab = "log-odds survive", ylab = "Density")
+        
+        for(i in 1:100){
+            curve(dcauchy(x, post_cau$a_bar[i], post_cau$sigma[i]), add = TRUE, col = col.alpha(blue, 0.4))
+            curve(dstudent(x, 2, post_stu$a_bar[i], post_stu$sigma[i]), add = TRUE, col = col.alpha(green, 0.4))
+            curve(dnorm(x, post_norm$a_bar[i], post_norm$sigma[i]), add = TRUE, col = col.alpha(red, 0.1))
+        }
+        mtext("100 distributions of the log-odds of \nsurvival sampled from the posterior")
+        
+        legend(x = -7, y = 0.65, 
+               legend = c(
+                   expression(a[TANK]%~%Normal(bar(alpha), sigma)), 
+                   expression(a[TANK]%~%Cauchy(bar(alpha), sigma)), 
+                   expression(a[TANK]%~%Student(bar(alpha), sigma))
+               ),
+               col = c(red, blue, green), pch = 16)
+        
+        
+        
+        # sample 8000 imaginary tanks from the posterior distribution
+        sim_tanks_norm <- rnorm  (2000, post_norm$a_bar, post_norm$sigma)
+        sim_tanks_cauc <- rcauchy(2000, post_cau$a_bar, post_cau$sigma)
+        sim_tanks_stud <- rstudent(2000, rep(2, 2000), post_stu$a_bar, post_stu$sigma)
+        
+        # transform to probability and visualise
+        dens(inv_logit(sim_tanks_norm), lwd = 2, adj = 0.1, col = red)
+        dens(inv_logit(sim_tanks_cauc), lwd = 2, adj = 0.1, col = blue, add = TRUE)
+        dens(inv_logit(sim_tanks_stud), lwd = 2, adj = 0.1, col = green, add = TRUE)
+        mtext("Survival probs for 2k new simulated tanks")
+        
+    }
+)
+```
+
+We again see similar results. In the 100 distributions, the student-t distribution is more spread out than the Cauchy distribution (thus less relative shrinkage). In the simulated probabilities of survival, the student-t has more weightage in the two extremes than m13.2 (with normal prior), but less than the one with Cauchy. 
+
+
+## 13M5
+> Modify the cross-classified chimpanzees model m13.4 so that the adaptive prior for blocks contains a parameter  $\bar \gamma$ for its mean:
+\begin{align}
+\gamma_j &\sim \text{Normal}(\bar \gamma, \sigma_\gamma) \\
+\bar \gamma &\sim \text{Normal}(0, 1.5)
+\end{align}
+Compare this model to m13.4. What has including $\bar \gamma$ done?
+
+
+The model equation now becomes:
+
+\begin{align}
+L_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{ACTOR[i]}} + \gamma_{\text{BLOCK[I]}} + \beta_{\text{TREATMENT[I]}} \\
+\beta_j  &\sim \text{Normal}(0, 0.5) \qquad &, \text{for j = 1 .. 4} \\
+\alpha_j &\sim \text{Normal}(\bar \alpha, \sigma_\alpha) \qquad &, \text{for j = 1 .. 7} \\
+\gamma_j & \sim \text{Normal}(\bar \gamma, \sigma_\gamma) \qquad & \text{, for j = 1 .. 6} \\
+\bar \alpha & \sim \text{Normal}(0, 1.5) \\
+\bar \gamma & \sim \text{Normal}(0, 1.5) \\
+\sigma_\alpha & \sim \text{Exponential}(1) \\
+\sigma_\gamma & \sim \text{Exponential}(1)
+\end{align}
+
+Loading dataset and pre-processing:
+```{r}
+library(rethinking)
+data(chimpanzees)
+d <- chimpanzees
+
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+
+dat_list <- list(
+    pulled_left = d$pulled_left, 
+    actor       = d$actor, 
+    block_id    = d$block,
+    treatment   = as.integer(d$treatment)
+)
+```
+
+
+```{r}
+set.seed(13)
+#original model from chapter
+m13.4 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + g[block_id] + b[treatment], 
+        b[treatment] ~ dnorm(0, 0.5), 
+        
+        ## adaptive priors
+        a[actor]     ~ dnorm(a_bar, sigma_a), 
+        g[block_id]  ~ dnorm(0    , sigma_g), 
+        
+        ## hyper priors
+        a_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1), 
+        sigma_g      ~ dexp(1) 
+    ), data = dat_list, chains = 4, cores = 4, log_lik = TRUE, refresh = 0
+)
+
+# model from question
+m5 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p), 
+        logit(p) <- a[actor] + g[block_id] + b[treatment], 
+        b[treatment] ~ dnorm(0, 0.5), 
+        
+        ## adaptive priors
+        a[actor]     ~ dnorm(a_bar, sigma_a), 
+        g[block_id]  ~ dnorm(g_bar, sigma_g), 
+        
+        ## hyper priors
+        a_bar        ~ dnorm(0, 1.5), 
+        g_bar        ~ dnorm(0, 1.5), 
+        sigma_a      ~ dexp(1), 
+        sigma_g      ~ dexp(1) 
+    ), data = dat_list, chains = 4, cores = 4, log_lik = TRUE, refresh = 0
+)
+```
+
+Let us look at the posterior distributions:
+
+```{r fig.height=8}
+withr::with_par(
+    list(mfrow = c(1,1)), 
+    code = {
+        layout(matrix(c(1, 2, 3, 3), 2, 2, byrow = TRUE))
+        plot(coeftab(m13.4, m5), pars = c("a_bar", "g_bar", "sigma_a", "sigma_g"))
+        plot(coeftab(m13.4, m5), pars = c(paste0("g[", 1:6, "]")))
+        plot(coeftab(m13.4, m5), pars = c(paste0("a[", 1:7, "]")))
+    }
+)
+```
+
+As was mentioned in the text as well, this seems to be the symptoms of multicollinearity for the g[i] and a[i] parameters. The interval on their parameters has wideneed considerably. 
+
+
+## 13M6
+> Sometimes the prior and the data (through the likelihood) are in conflict, because they concentrate around different regions of parameter space. What happens in these cases depends a lot upon the shape of the tails of the distributions. Likewise, the tails of distributions strongly influence whether outliers are shrunk or not towards the mean. I want you to consider four different models to fit to one observation at y = 0. The models differ only in the distributions assigned to the likelihood and prior. Here are the four models:
+\begin{align}
+\text{Model NN:} \quad y &\sim \text{Normal}(\mu, 1)  \qquad & \text{Model TN:} \quad y &\sim \text{Student}(2, \mu, 1) \\
+\mu &\sim \text{Normal}(10, 1) \qquad & \mu &\sim \text{Normal}(10, 1) \\
+\\
+\text{Model NT:} \quad y &\sim \text{Normal}(\mu, 1)  \qquad & \text{Model TT:} \quad y &\sim \text{Student}(2, \mu, 1) \\
+\mu &\sim \text{Student}(2, 10, 1)  & \mu &\sim \text{Student}(2, 10, 1)
+\end{align}
+Estimate the posterior distributions for these models and compare them. Can you explain the results, using the properties of the distributions?
+
+
+```{r results = 'hide'}
+library(rethinking)
+mnn <- ulam(
+    alist(
+        y ~ dnorm(mu, 1), 
+        mu ~ dnorm(10, 1)
+    ), data = list(y = 0), chains = 4
+)
+
+mtn <- ulam(
+    alist(
+        y ~ dstudent(2, mu, 1), 
+        mu ~ dnorm(10, 1)
+    ), data = list(y = 1), chains = 4
+)
+
+mnt <- ulam(
+    alist(
+        y ~ dnorm(mu, 1), 
+        mu ~ dstudent(2, 10, 1)
+    ), data = list(y = 1), chains = 4
+)
+
+mtt <- ulam(
+    alist(
+        y ~ dstudent(2, mu, 1), 
+        mu ~ dstudent(2, 10, 1)
+    ), data = list(y = 1), chains = 4
+)
+```
+
+For all the above models, we will simulate values of $y$ based on samples of $\mu$ obtained from the model. 
+
+```{r fig.width=8}
+# for each model extract samples of mu
+# then from those samples simulate values of y
+set.seed(1)
+samples <- purrr::imap(list(NN = mnn, 
+                            TN = mtn, 
+                            NT = mnt, 
+                            TT = mtt), 
+                       function(x, nm)
+                           extract.samples(x) %>% 
+                           bind_cols(model = nm)) %>% 
+    bind_rows() %>% 
+    
+    # simulate y based on model
+    mutate(y_sim = case_when(
+        model %in% c("NN","NT") ~ rnorm(1, mu, 1), 
+        model %in% c("TN","TT") ~ rstudent(1, 2, mu, 1)
+    ))
+
+samples %>% 
+    mutate(model = forcats::fct_relevel(model, "NN", "TN", "NT", "TT")) %>% 
+    mutate(cat = ifelse(model %in% c("NN", "TN"), "mu ~ normal", "mu ~ student")) %>% 
+    # filter(model %in% c("NN", "TN")) %>% 
+    ggplot(aes(x = y_sim, fill = model)) + 
+    geom_density(alpha = 0.5) + 
+    facet_wrap(~cat, scales = "free") +
+    scale_fill_brewer(palette = "Set1") +
+    expand_limits(x = 0) +
+    labs(x = "Simulated y", 
+         y = "Density", 
+         fill = "Model", 
+         title = "Distribution of simulated y for each model")
+```
+
+Going model wise:
+
+- **NN (y ~ normal, mu ~ normal(10, 1))** - The prior for mu is a normal distribution, which does not place much possibility to the extreme values. y = 0, is a very extreme value, and even in the posterior, it is a highly unlikely value. The density curve around 0 is almost flat. 
+- **TN (y ~ student, mu ~ normal(10, 1)** - Again, the prior for mu is a normal distribution, and the value of 0 is very unlikely. The distribution of y is a student-t distribution, but at $\nu=2$, the tails are only slightly fatter, and with an sd of one, even with fatter tails, y = 0, is still very very unlikely. 
+- **NT (y ~ normal, mu ~ student(2, 10, 1))** - mu has a prior with fatter tails, but still confined around 10. We end up getting almost exactly the same posterior as the first model (NN). y is expected to be normal with a narrow range so the single y = 0, does not shift the posterior that much towards it. It is still an outlier according to the model. 
+- **TT (y ~ student, mu ~ student) ** - y is expected to be student-t distributed, thus it expects fatter tails. The prior for mu is also student-t distributed with an expected mean of 10. The two student-t distributions combine to give the y = 0 enough probability. The posterior ends up bimodal now, with peaks around the observed data point y = 0 as well as the expected mean of prior - 10. 
+
+Let's also compare the priors to the posteriors to see how this one single observation, an extreme outlier affected the prior. 
+
+```{r}
+set.seed(14)
+
+prior_nn <- rnorm(2000, rnorm(2000, 10, 1), 1)
+prior_tn <- rstudent(2000, 2, rnorm(2000, 10, 1), 1)
+prior_nt <- rnorm(2000, rstudent(2000, 2, 10, 1), 1)
+prior_tt <- rstudent(2000, 2, rstudent(2000, 2, 10, 1), 1)
+
+priors <- tibble(NN = prior_nn, 
+                 TN = prior_tn,
+                 NT = prior_nt, 
+                 TT = prior_tt, 
+                 type = "prior") %>% 
+  pivot_longer(-type, names_to = "model", values_to = "y_sim")
+
+
+# combine the priors and posteriors
+bind_rows(
+  priors %>% mutate(type = "prior"), 
+  samples %>% mutate(type = "posterior")
+) %>% 
+  ggplot(aes(x = y_sim, fill = type)) + 
+  geom_density(alpha = 0.5) + 
+  facet_wrap(~model, scales = "free_x") + 
+  expand_limits(x = 0) + 
+  geom_vline(xintercept = 0, lty = 2) +
+  scale_fill_brewer(palette = "Set1") +
+  expand_limits(x = 0) +
+  coord_cartesian(xlim = c(-5, 15)) +
+  labs(x = "Simulated y", 
+       y = "Density", 
+       fill = "Prior/Posterior?", 
+       title = "Prior vs Posterior for y")
+```
+
+Except for TN (student-t y and normal mu) the posterior has shifted considerably because of y for each model and y = 0 is an event in their tails. Except for NN, every other model has a very long tail. 
+
+# Hard Questions
+
+## 13H1
+> In 1980, a typical Bengali woman could have 5 or more children in her lifetime. By the year 2000, a typical Bengali woman had only 2 or 3. You’re going to look at a historical set of data, when contraception was widely available but many families chose not to use it. These data reside in data(bangladesh) and come from the 1988 Bangladesh Fertility Survey. Each row is one of 1934 women. There are six variables, but you can focus on two of them for this practice problem: 
 > 
+ (1) `district`: ID number of administrative district each woman resided in 
+ (2) `use.contraception`: An indicator (0/1) of whether the woman was using contraception 
+> 
+The first thing to do is ensure that the cluster variable, district, is a contiguous set of integers. Recall that these values will be index values inside the model. If there are gaps, you’ll have parameters for which there is no data to inform them. Worse, the model probably won’t run. Look at the unique values of the district variable: 
+
+```{r}
+library(rethinking)
+data("bangladesh")
+d <- bangladesh
+sort(unique(d$district))
+```
+
+> District 54 is absent. So district isn’t yet a good index variable, because it’s not contiguous. This is easy to fix. Just make a new variable that is contiguous. This is enough to do it:
+
+```{r}
+d$district_id <- as.integer(as.factor(d$district))
+sort(unique(d$district_id))
+```
+
+> Now there are 60 values, contiguous integers 1 to 60. Now, focus on predicting `use.contraception`, clustered by district_id. Fit both:
+
+>
+ (1) a traditional fixed-effects model that uses an index variable for district and 
+ (2) a multilevel model with varying intercepts for district. 
+ 
+> Plot the predicted proportions of women in each district using `contraception`, for both the fixed-effects model and the varying-effects model. That is, make a plot in which district ID is on the horizontal axis and expected proportion using contraception is on the vertical. Make one plot for each model, or layer them on the same plot, as you prefer. How do the models disagree? Can you explain the pattern of disagreement? In particular, can you explain the most extreme cases of disagreement, both why they happen where they do and why the models reach different inferences?
+
+We will create the following two models:
+
+**Traditional Fixed Effects Model**
+
+\begin{align}
+\text{use.contraceptive} &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{district}[i]} \\
+\alpha_{\text{j}} &\sim \text{Normal}(0, 1.5) \qquad \text{[for j = district_ids 1 .. 60]}
+\end{align}
+
+**Mixed Effects Model**
+
+\begin{align}
+\text{use.contraceptive} &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{district}[i]} \\
+\alpha_{\text{j}} &\sim \text{Normal}(\bar \alpha, \sigma) \qquad \text{[adaptive prior]} \\
+\bar \alpha &\sim \text{Normal}(0, 1.5) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align}
+
+
+Modelling the above:
+
+```{r results='hide'}
+dat <- list(
+    D = d$district_id, 
+    UC = d$use.contraception
+)
+
+mh1_f <- ulam(
+    alist(
+        UC ~ dbinom(1, p), 
+        logit(p) <- a[D], 
+        a[D] ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+mh1_m <- ulam(
+    alist(
+        UC ~ dbinom(1, p), 
+        logit(p) <- a[D], 
+        a[D] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1.5), 
+        sigma ~ dexp(1)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+```
+
+Plotting the predicted proportions:
+
+```{r}
+post_f <- extract.samples(mh1_f)
+post_m <- extract.samples(mh1_m)
+
+pred_f <- logistic(colMeans(post_f$a))
+pred_m <- logistic(colMeans(post_m$a))
+
+raw_prop <- tapply(d$use.contraception, d$district_id, mean)
+
+# plot raw proportions
+plot(raw_prop, xlab = "District", ylab = "Proportion of women that use contraceptive", pch = 16)
+
+# plot predictions from traditional model
+points(pred_f, pch = 16, col = 'firebrick')
+
+# plot predictions from multilevel model
+points(pred_m, pch = 16, col = 'royalblue4')
+
+
+# plot posterior mean probability across districts for traditional model
+abline(h = mean(logistic(post_f$a)), lty = 2, col = 'firebrick')
+
+
+# plot posterior mean probability across districts for multilevel model
+abline(h = mean(logistic(post_m$a)), lty = 2, col = 'royalblue4')
+
+legend("topright", legend = c("Raw", "Traditional Model", "Multilevel Model"), 
+       col = c("black", "firebrick", "royalblue4"), pch = 16)
+
+```
+
+The raw estimates of women using contraceptives in each district and the district wise estimate of contraceptive usage by the two models is plotted above. The posterior mean probability from the two models is approximately the same. As we have already seen throughout, in the case of a multilevel model, adaptive regularisation pulls the estimates towards the mean which is easily apparent from the above image. This is even more apparent for the few cases where the actual contraception usage was either 0% or 100%, in which case the traditional model predicts a much higher estimate for the district compared to the multilevel model, which predicts much closer to the global mean. 
+
+## 13H2
+> Return to data(Trolley) from Chapter 12. Define and fit a varying intercepts model for these data. Cluster intercepts on individual participants, as indicated by the unique values in the id variable. Include action, intention, and contact as ordinary terms. Compare the varying intercepts model and a model that ignores individuals, using both WAIC and posterior predictions. What is the impact of individual variation in these data?
+
+```{r}
+library(rethinking)
+data(Trolley)
+d <- Trolley
+```
+
+Let's count the number of clusters in the dataset:
+
+```{r}
+length(unique(d$id))
+```
+
+We have 331 clusters. 
+
+The outcome was `response` which was an integer from 1 to 7 (ordinal). We will have the following model for this case:
+
+\begin{align}
+R_i &\sim \operatorname{Ordered-logit}(\phi_i, \kappa) \\
+\phi_i &=  \alpha_{\text{ind[i]}} + \beta_A A_i + \beta_C C_i + \beta_I I_i\\
+\beta_A, \beta_C, \beta_I &\sim \text{Normal}(0, 0.5)  \\
+\alpha_j &\sim \text{Normal}(\bar \alpha, \sigma)  \\
+\bar \alpha &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1) \\
+\kappa_k &\sim \operatorname{Normal}(0, 1.5) 
+\end{align}
+
+
+```{r}
+dat <- list(
+    A = d$action, 
+    I = d$intention, 
+    C = d$contact, 
+    R = d$response, 
+    id = as.integer(d$id)
+)
+
+# multilevel model
+mh2_m <- ulam(
+    alist(
+        R ~ dordlogit(phi, cutpoints), 
+        phi <- a[id] + bA*A + bC*C + bI*I, 
+        c(bA, bC, bI) ~ dnorm(0, 0.5), 
+        a[id] ~ dnorm(a_bar, sigma), 
+        a_bar ~ dnorm(0, 1), 
+        sigma ~ dexp(1), 
+        cutpoints ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, cores = 4, log_lik = TRUE
+)
+
+# traditional model
+mh2_f <- ulam(
+    alist(
+        R ~ dordlogit(phi, cutpoints), 
+        phi <- bA*A + bC*C + bI*I, 
+        c(bA, bC, bI) ~ dnorm(0, 0.5), 
+        cutpoints ~ dnorm(0, 1.5)
+    ), data = dat, chains = 4, cores = 4, log_lik = TRUE
+)
+```
+
+Comparing the two using WAIC:
+```{r}
+compare(mh2_m, mh2_f)
+```
+
+The multilevel model is vastly superior to the model that ignores individuals. dWAIC >> dSE, so the difference is significant enough. 
+
+Let's check the posterior distributions:
+
+```{r}
+post_m <- extract.samples(mh2_m)
+post_f <- extract.samples(mh2_f)
+
+# create test data with all individuals
+# we already know the impact of Action, Contact and Intention, 
+#   so fixing them to a set value
+id <- 1:331
+test_dat <- crossing(A = 0, 
+                     C = 1, 
+                     I = 1) %>% 
+    slice(-c(6, 8)) %>% 
+    crossing(id = id)
+
+get_resp_preds <- function(model, test_dat, post, type){
+    preds <- link(model, data = test_dat)
+    mu <- colMeans(preds)
+    bind_cols(
+        test_dat, 
+        mu = mu
+    ) %>% 
+        mutate(rn = row_number()) %>% 
+        group_by(rn) %>% 
+        mutate(resp = list(pordlogit(1:7, mu, post$cutpoints[sample(nrow(test_dat), 1), ]))) %>% 
+        mutate(resp = purrr::map(resp, setNames, paste0(type, 1:7))) %>% 
+        unnest_wider(resp) %>% 
+        pivot_longer(-c(A:rn), names_to = c("model", "response"), names_pattern = "(.*)(.)") %>% 
+        ungroup() %>% 
+        select(-rn)
+}
+
+test_resp <- bind_rows(
+    get_resp_preds(mh2_m, test_dat, post_m, "Multilevel"), 
+    get_resp_preds(mh2_f, test_dat, post_f, "Fixed")
+)
+
+test_resp %>% 
+    # showing only a few ids so that things are visible
+    filter(id %in% seq(1, 331, 20), 
+           response != 7) %>% 
+    
+    # plot
+    ggplot(aes(x = id, y = value, colour = response)) + 
+    geom_line() + 
+    facet_wrap(~model) + 
+    scale_colour_brewer(palette = "Dark2") + 
+    labs(x = "Participant ID", 
+         y = "Cumulative Probability of acceptability", 
+         title = "Posterior predictions for the two models for different participants", 
+         subtitle = "A = 0, C = 1, I = 1")
+```
+
+We can see that in the fixed model (where there is no influence of participant), the predictions are almost constant across the participants, whereas for the multilevel model, the probabilities of acceptance vary widely with participants. 
+
+
+## 13H3
+> The Trolley data are also clustered by story, which indicates a unique narrative for each vignette. Define and fit a cross-classified varying intercepts model with both id and story. Use the same ordinary terms as in the previous problem. Compare this model to the previous models. What do you infer about the impact of different stories on responses?
+
+There are 12 unique stories in the data. 
+
+```{r}
+length(unique(d$story))
+```
+
+We will update the model from the previous to include varying intercepts for story as well. We will also use a non-centered parameterisation to avoid issues with posterior exploration. 
+
+```{r}
+dat <- list(
+    A = d$action, 
+    I = d$intention, 
+    C = d$contact, 
+    R = d$response, 
+    id = as.integer(d$id), 
+    S = as.integer(d$story)
+)
+```
+
+
+```{r eval=FALSE}
+mh3 <- ulam(
+    alist(
+        R ~ dordlogit(phi, cutpoints), 
+        phi <- a_bar + a[id]*sigma_d + s[S]*sigma_s + bA*A + bC*C + bI*I, 
+        c(bA, bC, bI) ~ dnorm(0, 0.5), 
+        cutpoints ~ dnorm(0, 1.5), 
+        
+        # varying intercepts
+        a[id] ~ dnorm(0, 1), 
+        s[S]  ~ dnorm(0, 1), 
+        
+        # hyper-parameters
+        a_bar ~ dnorm(0, 1.5), 
+        sigma_d ~ dexp(1), 
+        sigma_s ~ dexp(1) 
+    ), data = dat, chains = 4, cores = 4, log_lik = TRUE, cmdstan = TRUE
+)
+```
+
+```{r}
+load("mh3.rdata")
+```
+
+
+We get warnings about low `n_eff` and high `Rhat` for the centered version and for `a_bar` we only get `n_eff` of 5. With the non-centered version we get much better results. 
+
+```{r}
+precis(mh3)
+```
+
+The value of sigma_s is much smaller than sigma_d, implying that there is much less variation due to stories than due to actors. 
+
+Let's compare the three models:
+
+```{r}
+compare(mh3, mh2_m, mh2_f)
+```
+
+The model with stories is much better than the other two, and dWAIC >> dSE, so the difference is meaningful enough. 
+
+## 13H4
+
+This is the same question as 13M1. 

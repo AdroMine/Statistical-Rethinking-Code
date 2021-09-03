@@ -881,7 +881,7 @@ We will now try a non-centered version of the model. We want to get the paramete
 \gamma_j &\sim \text{Normal}(0, \sigma_\gamma) & \qquad \text{[Intercept for blocks]}
 \end{align}
 
-We need to remove from the above two, $\bar \alpha$, $\sigma_alpha$ and $\sigma_\gamma$. We will again define some new variables that are given standard Normal distributions and then we'll reconstruct the original variables by undoing the transformation. This time we will do the reconstruction in the linear model. The completed non-centered model looks like (with altered parts in blue):
+We need to remove from the above two, $\bar \alpha$, $\sigma_\alpha$ and $\sigma_\gamma$. We will again define some new variables that are given standard Normal distributions and then we'll reconstruct the original variables by undoing the transformation. This time we will do the reconstruction in the linear model. The completed non-centered model looks like (with altered parts in blue):
 
 \begin{align}
 L_i &\sim \text{Binomial}(1, p_i) \\
@@ -963,7 +963,7 @@ We can transform non Gaussian distributions as well, for instance:
 
 $$
 \begin{align}
-x &\sim \text{Exponential}(1) \\
+x &\sim \text{Exponential}(\lambda) \\
 \text{can be re-written as} & \implies \\
 x &= z\lambda \\
 z &\sim \text{Exponential}(1)

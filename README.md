@@ -20,3 +20,4 @@ These are currently using package `rethinking`.
 | Chapter 11 | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter11/Chapter_11.html) | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter11/Chapter_11_EoC.html) |
 | Chapter 12 | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter12/Chapter_12.html) | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter12/Chapter_12_EoC.html) |
 | Chapter 13 | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter13/Chapter_13.html) | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter13/Chapter_13_EoC.html) |
+| Chapter 14 | [link](https://adromine.github.io/Statistical-Rethinking-Code/Chapter14/Chapter_14.html) | WIP                                                                                          |

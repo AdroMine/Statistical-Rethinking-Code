@@ -1,0 +1,1105 @@
+---
+title: "Statistical Rethinking Chapter 14 End of Chapter Questions"
+output:
+  # prettydoc::html_pretty:
+  #   theme: architect
+  #   highlight: github
+  rmdformats::readthedown:
+    gallery: true
+    self_contained: true
+    lightbox: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, dpi = 150, warning = FALSE, error = FALSE, cache = TRUE)
+library(rstan)
+rstan_options(auto_write = TRUE)
+Sys.setlocale(locale = "Chinese")
+```
+
+# Easy Questions
+
+## 14E1
+> Add to the following model varying slopes on the predictor __x__
+\begin{align}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{\text{GROUP[i]}} + \beta x_i \\
+\alpha_{\text{GROUP[i]}} &\sim \text{Normal}(\alpha, \sigma_\alpha) \\
+\alpha &\sim \text{Normal}(0, 10) \\
+\beta &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1) \\
+\sigma_\alpha &\sim \text{Exponential}(1)
+\end{align}
+
+To add varying slopes, $\beta$ will differ by GROUP. And then we will need to add the covariance matrix for $\alpha$ and $\beta$. 
+
+\begin{align}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{\text{GROUP[i]}} + \beta_{\text{GROUP[i]}} x_i \\
+
+\begin{bmatrix}
+\alpha_{\text{GROUP[i]}} \\ \beta_{\text{GROUP[i]}}
+\end{bmatrix} &\sim \text{MVNormal} \left( 
+\begin{bmatrix}
+\alpha \\ \beta
+\end{bmatrix} 
+, S \right)    & \text{[S is the covariance matrix]}  \\
+
+S &=  \begin{pmatrix}
+\sigma_\alpha & 0 \\ 
+0 & \sigma_\beta
+\end{pmatrix} 
+R
+\begin{pmatrix}
+\sigma_\alpha & 0 \\ 
+0 & \sigma_\beta
+\end{pmatrix} 
+\\
+
+\alpha &\sim \text{Normal}(0, 10) \\
+\beta &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1) \\
+\sigma_\alpha &\sim \text{Exponential}(1) \\
+\sigma_\beta &\sim \text{Exponential}(1) \\
+R &\sim \text{LKJcorr}(2)
+\end{align}
+
+We have a 2D Gaussian distribution defining $\alpha$ and $\beta$ priors. S is the covariance matrix and R is the correlation matrix between the two parameters. 
+
+## 14E2
+> Think up a context in which varying intercepts will be positively correlated with varying slopes. Provide a mechanistic explanation for the correlation. 
+
+A positive correlation implies that as the intercept increases so does the slope. One example could be where we try to model the wages earned with number of hours worked as predictors. Different jobs form a natural cluster here, with high paying jobs having both a higher intercept as well a higher slope (hourly wage rate). 
+
+## 14E3
+> When is it possible for a varying slopes model to have fewer effective parameters (as estimated by WAIC or PSIS) than the corresponding model with fixed (unpooled) slopes? Explain.
+
+As we saw in the previous chapter as well, when the standard deviation on the varying effect is small, then the effective number of parameters tend to be less than the the actual parameters. Possibly if there is high correlation between the intercepts and slopes (in a varying intercepts + varying slopes model), then the effective number of parameters could be less in the pooled model, since we get less information from the two correlated intercept + slope. 
+
+# Medium Questions
+
+## 14M1
+> Repeat the café robot simulation from the beginning of the chapter. This time, set rho to zero, so that there is no correlation between intercepts and slopes. How does the posterior distribution of the correlation reflect this change in the underlying simulation?
+
+Let's redo the simulation. We first define the parameters:
+
+```{r}
+a <- 3.5       # average morning wait time
+b <- (-1)      # average difference afternoon wait time
+sigma_a <- 1   # std dev in intercepts
+sigma_b <- 0.5 # std dev in slopes
+rho <- (0)     # correlation between intercepts and slopes
+```
+
+We next build the 2D Gaussian Distribution:
+
+```{r}
+# mean
+Mu <- c(a, b)
+
+# Build the covariance matrix
+sigmas <- c(sigma_a, sigma_b) # std devs
+Rho <- matrix(c(1, rho, rho, 1), nrow = 2) # correlation matrix
+
+# now matrix multiply to get covariance matrix
+Sigma <- diag(sigmas) %*% Rho %*% diag(sigmas)
+```
+
+Next we do the simulation:
+
+```{r}
+N_cafes <- 20
+
+# simulate alpha and betas
+set.seed(1)
+vary_effects <- MASS::mvrnorm(N_cafes, Mu, Sigma)
+a_cafe <- vary_effects[,1]
+b_cafe <- vary_effects[,2]
+
+set.seed(22)
+N_visits <- 10
+afternoon <- rep(0:1, N_visits * N_cafes/2)
+cafe_id <- rep(1:N_cafes, each = N_visits)
+mu <- a_cafe[cafe_id] + b_cafe[cafe_id] * afternoon
+sigma <- 0.5        # std dev within cafes
+wait <- rnorm(N_visits * N_cafes, mu, sigma)
+d <- data.frame(cafe = cafe_id, afternoon = afternoon, wait = wait)
+```
+
+Next we build the model:
+
+```{r results='hide'}
+library(rethinking)
+set.seed(123)
+m1 <- ulam(
+    alist(
+        wait ~ normal(mu, sigma), 
+        mu <- a_cafe[cafe] + b_cafe[cafe]*afternoon, 
+        c(a_cafe, b_cafe)[cafe] ~ multi_normal(c(a,b), Rho, sigma_cafe), 
+        a ~ normal(5, 2), 
+        b ~ normal(-1, 0.5), 
+        sigma_cafe ~ exponential(1), 
+        sigma ~ exponential(1), 
+        Rho ~ lkj_corr(2)
+    ), data = d, chains = 4, cores = 4 
+)
+```
+
+Let's plot the posterior correlation between slopes and intercepts:
+
+```{r}
+post <- extract.samples(m1)
+dens(post$Rho[,1,2], xlim = c(-1, 1), 
+     col = 'royalblue4', lwd = 2, xlab = "correlation")  # posterior
+```
+
+The posterior is centred around zero, but the credible interval have posterior mass ranging from -0.5 to +0.5, although we only simulated 20 observations, so there's bound to be high variation in our estimates. But, overall the model does capture the zero correlation correctly. 
+
+## 14M2
+> Fit this multilevel model to the simulated café data:
+\begin{align}
+W_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{ \text{CAFÉ[i]} } + \beta_{CAFÉ[i]}A_i  \\
+\alpha_{ \text{CAFÉ[i]} } &\sim \text{Normal}(\alpha, \sigma_\alpha) \\
+\beta_{ \text{CAFÉ[i]} } &\sim \text{Normal}(\beta, \sigma_\beta) \\
+\alpha &\sim \text{Normal}(0, 10) \\
+\beta &\sim \text{Normal}(0, 10) \\
+\sigma, \sigma_\alpha, \sigma_\beta &\sim \text{Exponential}(1)
+\end{align}
+
+
+We have a model that has both varying intercepts and varying slopes, but which does not take pool the correlation between them. 
+
+First let's simulate the data from the chapter:
+
+```{r}
+a <- 3.5       # average morning wait time
+b <- (-1)      # average difference afternoon wait time
+sigma_a <- 1   # std dev in intercepts
+sigma_b <- 0.5 # std dev in slopes
+rho <- (-0.7)  # correlation between intercepts and slopes
+# mean
+Mu <- c(a, b)
+
+# Build the covariance matrix
+sigmas <- c(sigma_a, sigma_b) # std devs
+Rho <- matrix(c(1, rho, rho, 1), nrow = 2) # correlation matrix
+
+# now matrix multiply to get covariance matrix
+Sigma <- diag(sigmas) %*% Rho %*% diag(sigmas)
+
+N_cafes <- 20
+
+# simulate alpha and betas
+set.seed(1)
+vary_effects <- MASS::mvrnorm(N_cafes, Mu, Sigma)
+a_cafe <- vary_effects[,1]
+b_cafe <- vary_effects[,2]
+
+set.seed(22)
+N_visits <- 10
+afternoon <- rep(0:1, N_visits * N_cafes/2)
+cafe_id <- rep(1:N_cafes, each = N_visits)
+mu <- a_cafe[cafe_id] + b_cafe[cafe_id] * afternoon
+sigma <- 0.5        # std dev within cafes
+wait <- rnorm(N_visits * N_cafes, mu, sigma)
+d <- data.frame(cafe = cafe_id, afternoon = afternoon, wait = wait)
+```
+
+
+
+Modelling it:
+
+```{r results='hide'}
+# model in question
+m2 <- ulam(
+    alist(
+        wait ~ normal(mu, sigma), 
+        mu <- a_cafe[cafe] + b_cafe[cafe]*afternoon, 
+        a_cafe[cafe] ~ normal(a, sigma_a), 
+        b_cafe[cafe] ~ normal(b, sigma_b), 
+        
+        a ~ normal(0, 10), 
+        b ~ normal(0, 10), 
+        c(sigma, sigma_a, sigma_b) ~ exponential(1)
+    ), data = d, chains = 4, cores = 4, log_lik = TRUE
+)
+
+# model from the chapter
+m14.1 <- ulam(
+    alist(
+        wait ~ normal(mu, sigma), 
+        mu <- a_cafe[cafe] + b_cafe[cafe]*afternoon, 
+        c(a_cafe, b_cafe)[cafe] ~ multi_normal(c(a,b), Rho, sigma_cafe), 
+        a ~ normal(5, 2), 
+        b ~ normal(-1, 0.5), 
+        sigma_cafe ~ exponential(1), 
+        sigma ~ exponential(1), 
+        Rho ~ lkj_corr(2)
+    ), data = d, chains = 4, cores = 4, log_lik = TRUE
+)
+```
+
+Comparing the two models using WAIC:
+
+```{r}
+compare(m2, m14.1)
+```
+
+The predictive accuracy is hardly different between the models. The model that models the covariance between them is supposed to do slightly better out of sample, but dSE is high enough that we cannot be sure. 
+
+Let's plot the posterior predictions:
+
+```{r}
+#compute unpooled estimates directly from data
+a1 <- sapply(1:N_cafes, function(i) mean(wait[cafe_id == i & afternoon == 0]))
+b1 <- sapply(1:N_cafes, function(i) mean(wait[cafe_id == i & afternoon == 1])) - a1
+
+# extract posterior means of partially pooled estimates
+post <- extract.samples(m14.1)
+a2 <- colMeans(post$a_cafe)
+b2 <- colMeans(post$b_cafe)
+
+# extract posterior means of m2
+post2 <- extract.samples(m2)
+a3 <- colMeans(post2$a_cafe)
+b3 <- colMeans(post2$b_cafe)
+
+
+# plot both and connect with lines
+
+plot(a1, b1, xlab = "intercept", ylab = "slope", 
+     pch = 16, col = rangi2, ylim = c(min(b1) - 0.1, max(b1) + 0.1), 
+     xlim = c(min(a1) - 0.1, max(a1) + 0.1))
+
+# plot predictions from m14.1
+points(a2, b2, pch = 1)
+# connect lines from original to m14.1
+for(i in 1:N_cafes)
+    lines( c(a1[i], a2[i]), c(b1[i], b2[i]) )
+
+
+# connect lines from original to m2
+points(a3, b3, pch = 16, col = "firebrick")
+for(i in 1:N_cafes)
+    lines( c(a1[i], a3[i]), c(b1[i], b3[i]), lty = 2)
+
+# superimposing contours of the population
+
+# compute posterior mean bivariate Gaussian
+Mu_est <- c(mean(post$a), mean(post$b))
+rho_est <- mean(post$Rho[,1,2])
+sa_est <- mean(post$sigma_cafe[,1])
+sb_est <- mean(post$sigma_cafe[,2])
+cov_ab <- sa_est*sb_est*rho_est
+Sigma_est <- matrix(c(sa_est^2, cov_ab, cov_ab, sb_est^2), ncol = 2)
+
+# draw contours
+library(ellipse)
+for(l in c(0.1, 0.3, 0.5, 0.8, 0.99))
+    lines(ellipse(Sigma_est, centre = Mu_est, level = l), col = col.alpha('black', 0.2))
+
+
+legend("topright", legend = c("original", "m14.1", "m2"), pch = c(16, 1, 16), col = c(rangi2, "black", "firebrick"))
+```
+
+The models mostly agree for the data points closer to the centre (mean of the multi-variate Gaussian), but the results between the models diverge more and more as we travel farther from the centre. Model `m14.1` that takes the covariance between the slopes and intercepts expects the correlations between them, so for the point on the right, it understands that a high intercept must be associated with a larger negative slope, while `m2`, which does not take the covariance of the parameters into account, or rather assumes that it is zero, does not take this into account and thus applies greater shrinkage and we can see that it shrinks the estimate for the slope much more. We can make a similar observation about the point on the left. 
+
+## 14M3
+> Re-estimate the varying slopes model for the UCBadmit data, now using a non-centered parameterization. Compare the efficiency of the forms of the model, using n_eff. Which is better? Which chain sampled faster?
+
+There is no model fit to the UCBadmit data in the chapter. Let's fit one. 
+
+```{r}
+library(rethinking)
+data("UCBadmit")
+d <- UCBadmit
+d
+```
+
+We will use department as the clustering variable and use gender as the predictor which will have varying slopes. 
+
+\begin{align}
+A_i &\sim \text{Binomial}(N_i, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{dept}} + \beta_{\text{dept}}M \\
+
+\text{The varying effects:} & \\
+
+
+\begin{bmatrix}
+\alpha_{\text{dept}} \\ \beta_{\text{dept}}
+\end{bmatrix} &\sim \text{MVNormal}
+\left( 
+\begin{bmatrix}
+\alpha \\ \beta
+\end{bmatrix}, S
+\right) \\
+
+\text{Priors}& \\
+
+S &= \begin{pmatrix} \sigma_\alpha & 0 \\ 0 & \sigma_\beta \end{pmatrix} 
+R  
+\begin{pmatrix} \sigma_\alpha & 0 \\ 0 & \sigma_\beta \end{pmatrix}  \\
+
+\alpha &\sim \text{Normal}(0, 1.5) \\
+\beta &\sim  \text{Normal}(0, 0.5) \\
+\sigma_\alpha, \sigma_\beta &\sim \text{Exponential}(1) \\
+R &\sim \text{LKJcorr}(2)
+\end{align}
+
+To simplify things, I will use dummy variable approach for gender. 
+
+```{r}
+dat_list <- list(
+    admit = d$admit, 
+    N = d$applications, 
+    M = ifelse(d$applicant.gender == "female", 0L, 1L), 
+    dept = as.integer(d$dept)
+)
+
+m3 <- ulam(
+    alist(
+        admit ~ dbinom(N, p), 
+        logit(p) <- a_dept[dept] + b_dept[dept]*M, 
+        
+        # varying effects 2D Gaussian
+        c(a_dept, b_dept)[dept] ~ multi_normal(c(a, b), Rho, sigma), 
+        
+        a ~ dnorm(0, 1.5), 
+        b ~ dnorm(0, 0.5), 
+        sigma ~ dexp(1), 
+        Rho ~ dlkjcorr(2)
+    ), data = dat_list, chains = 4, cores = 4
+)
+```
+
+Let's do a posterior validation check similar to what we did in chapter 11:
+
+```{r }
+postcheck(m3)
+```
+
+The model's predictions fit the data well
+
+Let's check the posterior mean:
+```{r fig.height=8}
+plot(precis(m3, 2))
+```
+
+The intercept for average gender effect contains probability mass on either size of zero. This is also the case for the all the varying slopes except for `b_dept[1]`
+
+Now let us create the non-centered version of it:
+
+```{r}
+m3_nc <- ulam(
+    alist(
+        admit ~ dbinom(N, p), 
+        
+        # split the a_dept into a_bar + something, similar for b_dept
+        logit(p) <- a_bar + beta[dept, 1] + (b_bar + beta[dept, 2])*M, 
+        
+        a_bar ~ dnorm(0, 1.5), 
+        b_bar ~ dnorm(0, 0.5), 
+        
+        # varying effects 2D Gaussian
+        transpars> matrix[dept, 2]: beta <- compose_noncentered(sigma_dept, L_Rho_dept, z_dept),
+        matrix[2, dept]: z_dept ~ normal(0, 1), 
+        
+        vector[2]:sigma_dept ~ exponential(1), 
+        cholesky_factor_corr[2]: L_Rho_dept ~ lkj_corr_cholesky(2), 
+        
+        gq> matrix[2,2]: Rho <<- Chol_to_Corr(L_Rho_dept)
+        
+    ), data = dat_list, chains = 4, cores = 4
+) 
+```
+
+Looking at the posterior:
+
+```{r}
+precis(m3_nc, 2)
+```
+
+We get similar results. The `n_eff` is actually worse for the non-centred model. Timing wise, I took note of the total elapsed time displayed for the 4 chains for sampling, and the non-centred version did worse (2 seconds per chain vs 1 second per chain for centered version of the model). 
+
+It could be that the parametrisation was not the most efficient one. 
+
+## 14M4
+> Use WAIC to compare the Gaussian process model of Oceanic tools to the models fit to the same data in Chapter 11. Pay special attention to the effective numbers of parameters, as estimated byWAIC.
+
+Let's re-create the three models from chapter 11 first:
+
+```{r results='hide'}
+library(rethinking)
+data("Kline")
+d <- Kline
+d$P <- scale(log(d$population))
+d$contact_id <- ifelse(d$contact == "high", 2, 1)
+
+dat <- list(
+    T = d$total_tools, 
+    P = d$P, 
+    cid = d$contact_id
+)
+
+# intercept only
+m11.9 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a, 
+        a ~ dnorm(3, 0.5)
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+# interaction model
+m11.10 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        log(lambda) <- a[cid] + b[cid] * P, 
+        a[cid] ~ dnorm(3, 0.5), 
+        b[cid] ~ dnorm(0, 0.2) 
+    ), data = dat, chains = 4, log_lik = TRUE
+)
+
+dat2 <- list(T = d$total_tools, P = d$population, cid = d$contact_id)
+m11.11 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        lambda <- exp(a[cid]) * P^b[cid] / g, 
+        a[cid] ~ dnorm(1, 1), 
+        b[cid] ~ dexp(1), 
+        g ~ dexp(1)
+    ), data = dat2, chains = 4, log_lik = TRUE
+)
+```
+
+Next, let us re-create the model from this chapter:
+
+```{r results='hide'}
+# load distance matrix
+data("islandsDistMatrix") # matrix of pairwise distances b/w islands in 1000 kms
+
+# display (measured in thousands of km)
+Dmat <- islandsDistMatrix
+colnames(Dmat) <- c("Ml", "Ti", "SC", "Ya", "Fi", "Tr", "Ch", "Mn", "To", "Ha")
+
+data(Kline2)    # load the ordinary data with coordinates
+d <- Kline2
+d$society <- 1:10    # index observations
+
+dat_list <- list(
+    T = d$total_tools, 
+    P = d$population, 
+    society = d$society, 
+    Dmat = islandsDistMatrix
+)
+
+
+m14.8 <- ulam(
+    alist(
+        T ~ dpois(lambda), 
+        lambda <- (a * P^b / g) * exp(k[society]), 
+        
+        vector[10]:k ~ multi_normal(0, SIGMA), 
+        
+        matrix[10, 10]:SIGMA <- cov_GPL2(Dmat, etasq, rhosq, 0.01), 
+        c(a, b, g) ~ dexp(1), 
+        etasq ~ dexp(2), 
+        rhosq ~ dexp(0.5)
+    ), data = dat_list, chains = 4, cores = 4, iter = 2000, log_lik = TRUE
+)
+```
+
+Finally, let us compare all the models:
+
+```{r}
+compare(m14.8, m11.9, m11.10, m11.11)
+```
+
+The multi-level model is expected to perform better out of sample, however, dWAIC is not that much greater than dSE, so the difference may not be significant. Looking at the effective number of parameters, the multilevel model seems to have the least number of effective parameters at around 4 while the intercept only model somehow has the highest at around 9! 
+
+## 14M5
+> Modify the phylogenetic distance example to use group size as the outcome and brain size as a predictor. Assuming brain size influences group size, what is your estimate of the effect? How does phylogeny influence the estimate?
+
+```{r}
+library(rethinking)
+library(ape)
+data("Primates301")     # primates data
+data("Primates301_nex") # phylogeny data
+d <- Primates301
+d$name <- as.character(d$name)
+dstan <- d[complete.cases(d$group_size, d$body, d$brain), ]
+spp_obs <- dstan$name
+
+dat_list <- list(
+    N_spp = nrow(dstan), 
+    M     = standardize(log(dstan$body)), 
+    B     = standardize(log(dstan$brain)), 
+    G     = standardize(log(dstan$group_size)), 
+    Imat  = diag(nrow(dstan))
+)
+
+tree_trimmed <- keep.tip(Primates301_nex, spp_obs)
+Dmat <- cophenetic(tree_trimmed)
+
+dat_list$Dmat <- Dmat[spp_obs, spp_obs] / max(Dmat)
+
+m5 <- ulam(
+    alist(
+        G ~ multi_normal(mu, SIGMA), 
+        mu <- a + bM*M + bB*B, 
+        matrix[N_spp, N_spp]: SIGMA <- cov_GPL1(Dmat, etasq, rhosq, 0.01), 
+        a ~ normal(0, 1), 
+        c(bM, bB) ~ normal(0, 0.5), 
+        etasq ~ half_normal(1, 0.25),
+        rhosq ~ half_normal(3, 0.25)
+    ), data = dat_list, chains = 4, cores = 4, refresh = 0
+)
+precis(m5)
+```
+
+The credible interval for the effect of brain size `bB` contains both sides of zero. So there's no evidence after taking into account phylogeny. 
+
+Let us also look at the posterior covariance:
+
+```{r}
+post <- extract.samples(m5)
+
+plot(NULL, xlim = c(0, max(dat_list$Dmat)), ylim = c(0, 1.5), 
+     xlab = "phylogenetic distance", ylab = "covariance")
+
+# posterior
+for(i in 1:30)
+    curve(post$etasq[i] * exp(-post$rhosq[i]*x), add = TRUE, col = rangi2)
+
+# prior mean and 89% interval
+eta <- abs(rnorm(1e3, 1, 0.25))
+rho <- abs(rnorm(1e3, 3, 0.25))
+d_seq <- seq(from = 0, to = 1, length.out = 50)
+K <- sapply(d_seq, function(x) eta*exp(-rho*x))
+
+lines(d_seq, colMeans(K), lwd = 2)
+shade(apply(K, 2, PI), d_seq)
+
+text(0.5, 0.5, "prior")
+text(0.2, 0.1, "posterior", col = rangi2)
+```
+
+The posterior is almost the same as the prior. This can also be seen in the `precis` output of the previous `precis`. So either the data was not enough or our initial prior happened to be very close to the posterior. 
+
+
+# Hard Questions
+
+## 14H1
+> Let’s revisit the Bangladesh fertility data, data(bangladesh), from the practice problems for Chapter 13. Fit a model with both varying intercepts by district_id and varying slopes of urban by district_id. You are still predicting use.contraception. Inspect the correlation between the intercepts and slopes. Can you interpret this correlation, in terms of what it tells you about the pattern of contraceptive use in the sample? It might help to plot the mean (or median) varying effect estimates for both the intercepts and slopes, by district. Then you can visualize the correlation and maybe more easily think through what it means to have a particular correlation. Plotting predicted proportion of women using contraception, with urban women on one axis and rural on the other, might also help.
+
+```{r}
+library(rethinking)
+data("bangladesh")
+d <- bangladesh
+d$district_id <- as.integer(as.factor(d$district))
+head(d)
+```
+
+- `woman` : ID for each woman in the sample
+- `district:` number for each district
+- `use.contraception` - 0/1 indicator of contraceptive use
+- `living.children` = num of living children
+- `age` - centred age
+- `urban` - 0/1 indicator of urban context
+
+We will be fitting the following model:
+
+\begin{align}
+\text{use.contraceptive} &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{\text{district[i]}} + \beta_{\text{district[i]}} \operatorname{Urban} \\
+
+\text{Adaptive Priors:}& \\
+
+\begin{bmatrix}
+\alpha_{\text{district[i]}} \\ \beta_{\text{district[i]}}
+\end{bmatrix} &\sim \text{MVNormal}
+\left( 
+\begin{bmatrix}
+\alpha \\ \beta
+\end{bmatrix} , S
+\right) \\
+
+S &= \begin{pmatrix}
+\sigma_\alpha & 0 \\ 0 & \sigma_\beta
+\end{pmatrix} R \begin{pmatrix}
+\sigma_\alpha & 0 \\ 0 & \sigma_\beta
+\end{pmatrix} \\
+
+R &\sim \text{LKJcorr}(2) \\
+\alpha &\sim \text{Normal}(0, 1.5) \\
+\beta &\sim \text{Normal}(0, 1) \\
+\sigma_\alpha, \sigma_\beta &\sim \text{Exponential}(1)
+
+\end{align}
+
+Nothing too different here. Let's model the above:
+
+```{r results='hide'}
+dat_list <- list(
+    UC = d$use.contraception, 
+    urban = d$urban, 
+    age = d$age.centered, 
+    children = d$living.children, 
+    district = d$district_id
+)
+
+mh1 <- ulam(
+    alist(
+        UC ~ binomial(1, p), 
+        logit(p) <- a[district] + bU[district] * urban, 
+        
+        c(a, bU)[district] ~ multi_normal(c(alpha, beta), Rho, sigma_district), 
+        alpha ~ normal(0, 1.5), 
+        beta ~ normal(0, 1), 
+        
+        sigma_district ~ exponential(1), 
+        Rho ~ lkj_corr(2)
+    ), data = dat_list, chains = 4, cores = 4
+)
+```
+
+Let's see the correlation between the intercept and slope:
+
+```{r}
+post <- extract.samples(mh1)
+dens(post$Rho[, 1, 2])
+cor <- mean(post$Rho[, 1, 2])
+mtext(sprintf("Mean posterior correlation = %.2f", round(cor, 2)))
+```
+
+The correlation is highly negative, with mean at -0.65. This implies that for districts with a high base rate of use of contraception, the effect of `urbanness` is less. 
+
+We can also directly plot the intercepts and slopes from the posterior to see the negative correlation:
+
+```{r}
+plot(colMeans(post$a), colMeans(post$bU), pch = 20, 
+     xlab = "Posterior mean intercepts", ylab = "Posterior mean slopes", 
+     main = "Posterior mean slopes vs intercepts")
+```
+
+Let's visualise at the varying intercepts and slopes by district:
+
+```{r}
+alpha <- post$a
+beta  <- post$bU
+library(tidyr)
+library(dplyr)
+
+params <- purrr::imap_dfr(list(intercept = alpha, slope = beta), function(x, nm) 
+    
+    pivot_longer(as.data.frame(x), cols = everything(), 
+                 names_prefix = "V", names_to = "district_id", names_transform = list(district_id = as.integer)) %>% 
+        mutate(parameter = nm)
+)
+
+params %>% 
+    group_by(district_id, parameter) %>% 
+    summarise(mean = mean(value), .groups = "drop") %>% 
+    ggplot(aes(x = district_id, y = mean, colour = parameter)) + 
+    geom_point() + 
+    # facet_wrap(~parameter) + 
+    scale_x_continuous(n.breaks = 10) + 
+    geom_smooth(method = "lm", se = FALSE) + 
+    labs(x = "District id", 
+         y = "Mean Posterior value", 
+         title = "Mean posterior varying effects by district id", 
+         subtitle = "The trend line shows the negative correlation between the two", 
+         colour = "")
+```
+
+I have plotted the mean posterior varying effects for each district and added a simple trend line for the two parameters. We can see the negative correlation between the slope and intercept varying effects. 
+
+Let's take a look at the posterior predictions by the model:
+
+```{r}
+test_data <- crossing(district = 1:60, 
+                      urban = 0L:1L)
+preds <- link(mh1, data = test_data, post = post)
+
+# create test data with districts from 1 to 60 and both urban = 0 and 1
+crossing(district = 1:60, urban = 0L:1L) %>% 
+    nest(data = c(district, urban)) %>% 
+    
+    # get predictions from model
+    mutate(pred = purrr::map(data, ~link(mh1, data = ., post = post))) %>% 
+    
+    # extract posterior means for each district-urban combination
+    mutate(mean_prop = purrr::map(pred, colMeans)) %>% 
+    
+    # formatting
+    unnest(c(data, mean_prop)) %>% 
+    select(-pred) %>% 
+    mutate(urban = as.factor(urban)) %>% 
+    
+    # plot the results
+    ggplot(aes(x = district, y = mean_prop, colour = urban)) + 
+    geom_point() + 
+    
+    # trend line
+    geom_smooth(method = "lm", se = FALSE) + 
+    
+    # formatting
+    labs(x = "District ID", 
+         y = "% of women using contraception", 
+         title = "Posterior predicted proportion of women using contraception") + 
+    scale_y_continuous(labels = scales::percent) + 
+    scale_x_continuous(n.breaks = 10)
+```
+
+I have plotted the predicted proportion of women using contraception for each district while keeping both urban to 0 and 1 for each district (indicator of urban context). We can see that the higher district ids have a higher rate of women using contraception among the non-urbans and vice versa for the urbans, although the variation is high. A trend line has been plotted to ease these observations. The effect of `urban` also seems to be substantial, with a clear demarcation between their proportions. 
+
+## 14H2
+> Now consider the predictor variables `age.centered` and `living.children`, also contained in `data(bangladesh)`. Suppose that age influences contraceptive use (changing attitudes) and number of children (older people have had more time to have kids). Number of children may also directly influence contraceptive use. Draw a DAG that reflects these hypothetical relationships. Then build models needed to evaluate the DAG. You will need at least two models. Retain district and urban, as in 14H1. What do you conclude about the causal influence of age and children?
+
+Let's draw the DAG implied in the question. 
+
+```{r}
+library(dagitty)
+women_dag <- dagitty("dag{
+                     age      -> UC
+                     age      -> children
+                     children -> UC
+                     urban    -> UC
+                     urban    -> children
+}")
+coordinates(women_dag) <- list(
+    x = c(age = 0, UC = 1, children = 0, urban = 0),  
+    y = c(age = 0, UC = 1, children = 1, urban = 2)  
+)
+drawdag(women_dag)
+```
+
+I have also added `urban` in the DAG, since it might be a possible influence for the number of children (people have more children in rural areas compared to urban areas generally). 
+
+We want to find the effect of age and children on use of contraception. 
+
+Let's use dagitty to find out which variables to condition on for each case:
+
+```{r}
+adjustmentSets(women_dag, exposure = "age", outcome = "UC")
+```
+
+So for determining the influence of age, we don't need to condition on anything (this is also apparent from the DAG, there are no backdoors into age). As mentioned in the question, we will retain `district` and `urban`. We will not be using varying effects for age. 
+
+```{r}
+adjustmentSets(women_dag, exposure = "children", outcome = "UC")
+```
+
+For determining the influence of number of children on use of contraceptive, we need to condition on both age and urban (forks from age and urban). We will be retaining `district` and `urban` and not using varying effects for number of children. 
+
+The two models:
+
+```{r results='hide'}
+mh2_age <- ulam(
+    alist(
+        UC ~ binomial(1, p), 
+        logit(p) <- a[district] + bU[district] * urban + bA*age, 
+        
+        c(a, bU)[district] ~ multi_normal(c(alpha, beta), Rho, sigma_district), 
+        alpha ~ normal(0, 1.5), 
+        beta ~ normal(0, 1), 
+        bA   ~ normal(0, 1), 
+        
+        sigma_district ~ exponential(1), 
+        Rho ~ lkj_corr(2)
+    ), data = dat_list, chains = 4, cores = 4
+)
+
+mh2_child <- ulam(
+    alist(
+        UC ~ binomial(1, p), 
+        logit(p) <- a[district] + bU[district] * urban + bC*children, 
+        
+        c(a, bU)[district] ~ multi_normal(c(alpha, beta), Rho, sigma_district), 
+        alpha ~ normal(0, 1.5), 
+        beta ~ normal(0, 1), 
+        bC   ~ normal(0, 1), 
+        
+        sigma_district ~ exponential(1), 
+        Rho ~ lkj_corr(2)
+    ), data = dat_list, chains = 4, cores = 4
+)
+```
+
+Let's look at the posterior for the two models:
+
+```{r}
+precis(mh2_age)
+```
+
+The coefficient for age is very small and the credible interval contains 0, so we cannot say that age has any influence on use of contraception (at least according to our DAG). 
+
+```{r}
+precis(mh2_child)
+```
+
+The coefficient for the effect of number of children is reliably positive, although small. Thus according to the model, with more children the use of contraception increases. 
+
+## 14H3
+> Modify any models from 14H2 that contained that children variable and model the variable now as a monotonic ordered category, like education from the week we did ordered categories. Education in that example had 8 categories. Children here will have fewer (no one in the sample had 8 children). So modify the code appropriately. What do you conclude about the causal influence of each additional child on use of contraception?
+
+Let us find the range of number of children in the dataset:
+```{r}
+range(dat_list$children)
+```
+
+So we will have four levels. Let's model children as an ordered categorical predictor. 
+
+```{r}
+dat_list$alpha <- rep(2, 3)
+
+mh3 <- ulam(
+    alist(
+        UC ~ binomial(1, p),
+        # logit(p) <- a[[district]] + bU[[district]]*urban + bC*sum(delta_j[1:children]),
+        logit(p) <- v[district, 1]  + v[district, 2]*urban + bC*sum(delta_j[1:children]),
+        
+        vector[2]: v[district] ~ multi_normal(v_mu, Rho, sigma_district), 
+        # c(a, bU)[district] ~ multi_normal(c(alpha, beta), Rho, sigma_district),
+        
+        vector[2]: v_mu ~ normal(0, 1), 
+        
+        # alpha ~ normal(0, 1.5),
+        # beta  ~ normal(0, 1),
+        
+        bC    ~ normal(0, 1),
+        
+        sigma_district[1] ~ exponential(1),
+        sigma_district[2] ~ exponential(1),
+        
+        Rho ~ lkj_corr(2),
+        
+        vector[4]: delta_j <<- append_row(0, delta), 
+        simplex[3]: delta ~ dirichlet(alpha)
+        
+    ), data = dat_list, chains = 4, cores = 4
+)
+```
+
+
+```{r echo=FALSE, eval=FALSE}
+# below not needed anymore
+library(brms)
+bh3 <- brm(data = d,
+           family = binomial,
+           use.contraception | trials(1) ~ 1 + urban + mo(living.children) + (1 + urban|district_id),
+           prior = c(
+               prior(normal(0, 1.5), class = Intercept),
+               prior(normal(0, 1),   class = b),
+               prior(normal(0, 1),   class = b, coef = moliving.children),
+               prior(dirichlet(2, 2, 2), class = simo, coef = moliving.children1),
+               prior(exponential(1), class = sd),
+               prior(lkj(2), class = cor)
+           ),
+           file = "bh3",
+           iter = 1000, chains = 4, cores = 4)
+summary(bh3)
+plot(conditional_effects(bh3, "living.children"))[[1]] + 
+    scale_y_continuous(labels = scales::percent) + 
+    expand_limits(y = 1) + 
+    labs(x = "Number of living children", 
+         y = "Proportion of women that use contraceptives", 
+         title = "Use of contraceptives increases after 2 living children")
+```
+
+```{r}
+precis(mh3, 2)
+```
+
+The coefficient for `living.children` `bC` is 1 and strictly positive. This is the maximum effect possible at children = 4. So we still have contraception use increasing with increasing number of living children. However, if we look at the `delta` parameters, we can see that the effect is not the same throughout. `delta[1]`, which is the effect on use of contraception from going from one living children to two, is the highest. 
+
+```{r}
+post <- extract.samples(mh3)
+delta <- post$delta
+delta_mu <- apply(delta, 2, mean)
+delta_PI <- apply(delta, 2, PI)
+
+new_dat <- expand.grid(
+    urban = 0, 
+    age   = 0, 
+    children = 1:4, 
+    district = 1
+)
+
+post$delta <- cbind(0, post$delta)
+
+preds <- matrix(NA, nrow = 2000, ncol = 4)
+for(i in 1:4){
+    did <- 1
+    urban <- 1
+    children <- i
+    
+    for(j in 1:2000)
+        preds[j, i] <- with(post, 
+                            inv_logit(v[j, did, 1] + v[j, did,2] * urban + bC[j] * sum(delta[j,1:children]))
+        )
+}
+
+plot(NULL, xlim = c(1, 4), ylim = c(0, 1), 
+     xlab = "no of children", ylab = "proportion of women using contraceptives", 
+     main = "Posterior predictive check", xaxt = "n", yaxt = "n")
+axis(1, at = 1:4)
+axis(2, at = seq(0, 1, length.out = 10), labels = paste0(seq(10, 100, 10), "%"))
+lines(1:4, colMeans(preds))
+shade(apply(preds, 2, PI), 1:4)
+```
+
+Treating number of living children as an ordered categorical predictor leads to an increased association with use of contraceptives and we get deeper insights, that the effect is not constant for different number of children, but maximum at two children. 
+
+## 14H4
+> Varying effects models are useful for modeling time series, as well as spatial clustering. In a time series, the observations cluster by entities that have continuity through time, such as individuals. Since observations within individuals are likely highly correlated, the multilevel structure can help quite a lot. You’ll use the data in data(Oxboys), which is 234 height measurements on 26 boys from an Oxford Boys Club (I think these were like youth athletic leagues?), at 9 different ages (centered and standardized) per boy. You’ll be interested in predicting height, using age, clustered by `Subject` (individual boy). Fit a model with varying intercepts and slopes (on age), clustered by Subject. Present and interpret the parameter estimates. Which varying effect contributes more variation to the heights, the intercept or the slope?
+
+```{r}
+library(rethinking)
+data("Oxboys")
+d <- Oxboys
+str(d)
+```
+
+We will create the following model:
+
+\begin{align}
+\operatorname{Height}_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{\text{subject[i]}} + \beta_{\text{subject[i]}} \operatorname{Age} \\
+
+\text{Varying effects:}& \\
+
+\begin{bmatrix}
+\alpha_{\text{subject[i]}} \\ \beta_{\text{subject[i]}}
+\end{bmatrix} &\sim \text{MVNormal}
+\left( 
+\begin{bmatrix}
+\alpha \\ \beta
+\end{bmatrix} , S
+\right) \\
+
+S &= \begin{pmatrix}
+\sigma_\alpha & 0 \\ 0 & \sigma_\beta
+\end{pmatrix} R \begin{pmatrix}
+\sigma_\alpha & 0 \\ 0 & \sigma_\beta
+\end{pmatrix} \\
+
+\text{Priors:}& \\
+\alpha, \beta &\sim \text{Normal}(0, 1)  \\
+\sigma, \sigma_\alpha, \sigma_\beta &\sim \text{Exponential}(1) \\
+R &\sim \text{LKJCorr}(2)
+
+\end{align}
+
+Modelling this:
+
+```{r results='hide'}
+
+dat_list <- list(
+    height = standardize(d$height), 
+    age    = d$age, 
+    subject = d$Subject
+)
+
+mh4 <- ulam(
+    alist(
+        height ~ normal(mu, sigma), 
+        mu <- a[subject] + bA[subject]*age, 
+        
+        c(a, bA)[subject] ~ multi_normal(c(a_bar, b_bar), Rho, sigma_subject), 
+        
+        a_bar         ~ normal(0, 1), 
+        b_bar         ~ normal(0, 1), 
+        Rho           ~ lkj_corr(2), 
+        sigma         ~ exponential(1), 
+        sigma_subject ~ exponential(1)
+        
+    ), data = dat_list, chains = 4, cores = 4
+)
+```
+
+Let's look at the posterior means:
+
+```{r}
+precis(mh4)
+```
+
+We standardised height for modelling, so mean of intercept comes out as zero as expected. The mean value of the slope (for age) is positive, implying age increases with height (no surprises there!). Let's look at the standard deviations of the two varying effects:
+
+```{r}
+precis(mh4, 2, pars = c("sigma_subject"))
+```
+
+There's much larger variation in the intercepts than the slopes. (`sigma_subject[1]` denotes variation for intercept). 
+
+
+## 14H5
+> Now consider the correlation between the varying intercepts and slopes. Can you explain its value? How would this estimated correlation influence your predictions about a new sample of boys?
+
+```{r}
+precis(mh4, 3, pars = "Rho")
+```
+
+The correlation is positive and moderately strong. Let's visualise the full posterior of the correlation. 
+
+```{r}
+post <- extract.samples(mh4)
+dens(post$Rho[, 1, 2])
+mtext(sprintf("Posterior correlation between intercept and slopes. \nMean value = %.2f", mean(post$Rho[, 1, 2])), adj = 0)
+```
+
+The correlation is positive and moderately strong. This implies that the slope increases with increasing intercept. In practical terms, taller boys get taller more quickly with age. 
+
+## 14H6
+> Use mvrnorm (in library(MASS)) or rmvnorm (in library(mvtnorm)) to simulate a new sample of boys, based upon the posterior mean values of the parameters. That is, try to simulate varying intercepts and slopes, using the relevant parameter estimates, and then plot the predicted trends of height on age, one trend for each simulated boy you produce. A sample of 10 simulated boys is plenty, to illustrate the lesson. You can ignore uncertainty in the posterior, just to make the problem a little easier. But if you want to include the uncertainty about the parameters, go for it. Note that you can construct an arbitrary variance-covariance matrix to pass to either mvrnorm or rmvnorm with something like:
+
+```{r eval=FALSE}
+S <- matrix(c (sa^2, sa*sb*rho, sa*sb*rho, sb^2), nrow = 2)
+```
+> where sa is the standard deviation of the first variable, sb is the standard deviation of the second variable, and rho is the correlation between them.
+
+Let's extract samples from posterior:
+```{r}
+post <- extract.samples(mh4)
+
+sigma_int   <- mean(post$sigma_subject[,1])
+sigma_slope <- mean(post$sigma_subject[,2])
+rho         <- mean(post$Rho[, 1, 2])
+
+S <- matrix( c (sigma_int^2, 
+                sigma_int * sigma_slope*rho, 
+                sigma_int * sigma_slope*rho, 
+                sigma_slope^2), nrow = 2)
+mu <- c(mean(post$a_bar), mean(post$b_bar))
+```
+
+Let's pull some intercepts and slopes:
+
+```{r}
+set.seed(213)
+sim_samples <- MASS::mvrnorm(n = 10, mu = mu, Sigma = S)
+```
+
+Let's predict height using these:
+```{r}
+age_seq <- seq(-2, 2, length.out = 30)
+
+# create empty matrix of predictions,
+# rows are samples
+# columns are predicted values for increasing age
+preds <- matrix(NA, nrow = 10, ncol = 30)
+
+# compute predictions for each person
+for(i in 1:10){
+    preds[i, ] <- t(cbind(1, age_seq) %*% sim_samples[i,]) # this is just Y_hat = XB
+}
+
+cols <- RColorBrewer::brewer.pal(n = 10, "Paired")
+plot(NULL, xlim = c(-2, 2), ylim = c(-3, 3), 
+     xlab = "age (standardised)", ylab = "predicted height (standardised)")
+for(i in 1:10)
+    lines(age_seq, preds[i, ], col = cols[i], lwd = 2)
+```
+
